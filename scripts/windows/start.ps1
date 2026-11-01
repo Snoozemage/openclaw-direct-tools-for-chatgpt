@@ -7,7 +7,6 @@ $AppHome = Join-Path $env:LOCALAPPDATA 'OpenClawChatGPTBridge'
 $ConfigFile = Join-Path $AppHome 'config.json'
 $DefaultCredentialTarget = 'OpenClawChatGPTBridge/CONTROL_PLANE_API_KEY'
 . (Join-Path $PSScriptRoot 'credential-store.ps1')
-$GatewayPidFile = Join-Path $AppHome 'gateway.pid'
 $BridgePidFile = Join-Path $AppHome 'bridge.pid'
 $BridgeSupervisorPidFile = Join-Path $AppHome 'bridge-supervisor.pid'
 $BridgeSupervisorStopFile = Join-Path $AppHome 'bridge-supervisor.stop'
@@ -25,11 +24,6 @@ function Test-Port([int]$Port) {
     $client = [Net.Sockets.TcpClient]::new()
     try { $task = $client.ConnectAsync('127.0.0.1', $Port); return $task.Wait(500) -and $client.Connected }
     catch { return $false } finally { $client.Dispose() }
-}
-function Wait-Port([int]$Port, [int]$Seconds) {
-    $until = (Get-Date).AddSeconds($Seconds)
-    do { if (Test-Port $Port) { return $true }; Start-Sleep -Milliseconds 500 } while ((Get-Date) -lt $until)
-    return $false
 }
 function Wait-Json([string]$Url, [int]$Seconds) {
     $until = (Get-Date).AddSeconds($Seconds)
@@ -82,7 +76,7 @@ $env:OPENCLAW_BRIDGE_AGENT = if ($Cfg.agentId) { [string]$Cfg.agentId } else { '
 $env:OPENCLAW_GATEWAY_PORT = [string]$Cfg.gatewayPort
 $env:OPENCLAW_BRIDGE_INVOKE_TIMEOUT_MS = '120000'
 
-# Fail before starting Gateway/bridge if the tunnel needs to start but no credential is stored.
+# Fail before starting the bridge/tunnel if the tunnel needs to start but no credential is stored.
 $tunnelHealth = 'http://127.0.0.1:' + $Cfg.tunnelHealthPort
 $initialTunnelReady = Get-Json ($tunnelHealth + '/readyz')
 $initialTunnelHealthy = $initialTunnelReady -and (($initialTunnelReady -is [string] -and $initialTunnelReady.Trim() -eq 'ready') -or $initialTunnelReady.status -eq 'ready')
@@ -98,29 +92,28 @@ if (-not $initialTunnelHealthy) {
     }
 }
 
-# Start Gateway directly when nothing is listening; do not take over an existing service/process.
+# Gateway lifecycle is owned by its independent Scheduled Task. This script only waits for readiness.
 $gatewayPort = [int]$Cfg.gatewayPort
-if (Test-Port $gatewayPort) {
-    Write-Host "OpenClaw Gateway already listening on 127.0.0.1:$gatewayPort; leaving that process untouched." -ForegroundColor Green
-} else {
-    Write-Host "Starting OpenClaw Gateway on 127.0.0.1:$gatewayPort ..."
-    $gatewayOut = Join-Path $LogDir 'gateway.stdout.log'
-    $gatewayErr = Join-Path $LogDir 'gateway.stderr.log'
-    $gatewayArgs = '"' + [string]$Cfg.openclawCliPath + '" gateway run --port ' + $gatewayPort
-    $gatewayProcess = Start-LoggedProcess -FilePath ([string]$Cfg.nodePath) -Arguments $gatewayArgs -OutFile $gatewayOut -ErrFile $gatewayErr -WorkingDirectory ([string]$Cfg.openclawHome)
-    Set-Content -LiteralPath $GatewayPidFile -Value $gatewayProcess.Id -Encoding ASCII
-    if (-not (Wait-Port $gatewayPort 300)) {
-        $gatewayDetails = @()
-        if (Test-Path -LiteralPath $gatewayErr) { $gatewayDetails += (Get-Content -LiteralPath $gatewayErr -Tail 30) }
-        if (Test-Path -LiteralPath $gatewayOut) { $gatewayDetails += (Get-Content -LiteralPath $gatewayOut -Tail 20) }
-        $gatewayDetailsText = $gatewayDetails -join [Environment]::NewLine
-        $stillRunning = Get-Process -Id $gatewayProcess.Id -ErrorAction SilentlyContinue
-        if ($stillRunning) { Stop-Process -Id $gatewayProcess.Id -Force -ErrorAction SilentlyContinue }
-        Remove-Item -LiteralPath $GatewayPidFile -Force -ErrorAction SilentlyContinue
-        throw "OpenClaw Gateway failed to listen on port $gatewayPort within 120 seconds. See $gatewayOut and $gatewayErr. $gatewayDetailsText"
+$gatewayReady = $false
+$gatewayDeadline = (Get-Date).AddSeconds(300)
+Write-Host "Waiting for independently managed OpenClaw Gateway on 127.0.0.1:$gatewayPort ..."
+do {
+    if (Test-Port $gatewayPort) {
+        $gatewayStatusOutput = & ([string]$Cfg.nodePath) ([string]$Cfg.openclawCliPath) gateway status --json 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            try {
+                $gatewayStatus = $gatewayStatusOutput | ConvertFrom-Json
+                $gatewayReady = [bool]$gatewayStatus.rpc.ok
+            } catch { $gatewayReady = $false }
+        }
+        if (-not $gatewayReady) { Write-Host 'Gateway listener is open but RPC is not ready yet; waiting for startup admission.' }
     }
-    Write-Host "OpenClaw Gateway started (PID $($gatewayProcess.Id))." -ForegroundColor Green
+    if (-not $gatewayReady) { Start-Sleep -Seconds 3 }
+} while (-not $gatewayReady -and (Get-Date) -lt $gatewayDeadline)
+if (-not $gatewayReady) {
+    throw "The independent OpenClaw Gateway did not become RPC-ready on port $gatewayPort within 300 seconds. Inspect the 'OpenClaw Gateway (ChatGPT Bridge)' Scheduled Task and gateway-task.log."
 }
+Write-Host "OpenClaw Gateway is RPC-ready on 127.0.0.1:$gatewayPort; bridge startup may proceed." -ForegroundColor Green
 
 $base = 'http://127.0.0.1:' + $Cfg.bridgePort
 $scriptPath = Join-Path $RepoRoot 'src\server.mjs'

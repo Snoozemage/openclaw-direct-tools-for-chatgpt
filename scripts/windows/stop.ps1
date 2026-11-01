@@ -6,7 +6,6 @@ $AppHome = Join-Path $env:LOCALAPPDATA 'OpenClawChatGPTBridge'
 $ConfigFile = Join-Path $AppHome 'config.json'
 if (-not (Test-Path -LiteralPath $ConfigFile)) { Write-Host 'No local configuration is installed.'; exit 0 }
 $cfg = Get-Content -LiteralPath $ConfigFile -Raw | ConvertFrom-Json
-$GatewayPidFile = Join-Path $AppHome 'gateway.pid'
 $BridgePidFile = Join-Path $AppHome 'bridge.pid'
 $BridgeSupervisorPidFile = Join-Path $AppHome 'bridge-supervisor.pid'
 $BridgeSupervisorStopFile = Join-Path $AppHome 'bridge-supervisor.stop'
@@ -78,6 +77,4 @@ $bridgePath = Join-Path ([string]$cfg.repoPath) 'src\server.mjs'
 Stop-BridgeSupervisor
 Stop-OwnedProcess -PidFile $BridgePidFile -ExpectedExecutable ([string]$cfg.nodePath) -ExpectedArgument $bridgePath
 Stop-OwnedProcess -PidFile $TunnelPidFile -ExpectedExecutable ([string]$cfg.tunnelClientPath) -ExpectedArgument 'tunnel-client'
-$gatewayArgs = '"' + [string]$cfg.openclawCliPath + '" gateway run'
-Stop-OwnedProcess -PidFile $GatewayPidFile -ExpectedExecutable ([string]$cfg.nodePath) -ExpectedArgument $gatewayArgs
-Write-Host 'Stop complete. The Gateway is stopped only if start.ps1 launched it; pre-existing Gateway processes are left untouched.' -ForegroundColor Cyan
+Write-Host 'Stop complete. OpenClaw Gateway is independently managed and remains running.' -ForegroundColor Cyan
