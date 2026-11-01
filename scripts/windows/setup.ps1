@@ -344,4 +344,5 @@ if ($doctorExit -ne 0) { Write-Warning 'tunnel-client doctor reported a problem;
 
 Write-Host "`nSetup saved. Local configuration: $ConfigFile" -ForegroundColor Green
 Write-Host 'Next: run npm start to start the bridge and tunnel, then open the local Overview.' -ForegroundColor Green
+Write-Host 'Optional: run npm run autostart:install to register automatic startup at Windows sign-in. Setup does not enable autostart.' -ForegroundColor Cyan
 if ($doctorExit -ne 0) { exit $doctorExit }

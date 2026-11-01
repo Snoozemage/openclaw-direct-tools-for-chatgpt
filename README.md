@@ -109,7 +109,7 @@ For implementation guidance, see [Tool Exposure Guide](docs/TOOL_EXPOSURE_GUIDE.
 
 1. Open [OpenAI Platform Tunnels settings](https://platform.openai.com/settings/organization/tunnels) and create a Secure MCP Tunnel. Note its `tunnel_id` and associate the tunnel with the ChatGPT workspace where the connector will be created. A tunnel attached only to a Platform organization may not appear in a separate ChatGPT workspace.
 2. Create or select an **OpenAI Platform API key** for the tunnel client. This key authenticates `tunnel-client` to OpenAI's tunnel control plane; it is required even though the MCP bridge itself runs locally. Grant it **Tunnels Read + Use** so it can run the tunnel and select it for the ChatGPT connection. Creating or editing the tunnel requires **Tunnels Read + Manage** for the account performing that operation.
-3. The API key for `tunnel-client` is separate from your ChatGPT sign-in and from the authentication setting on the ChatGPT custom MCP plugin. The setup wizard prompts for the key using hidden input and stores it in a user-restricted local file. Do not paste it into ChatGPT, put it in the repository, or commit it to Git.
+3. The API key for `tunnel-client` is separate from your ChatGPT sign-in and from the authentication setting on the ChatGPT custom MCP plugin. The setup wizard prompts for the key using hidden input and stores it in **Windows Credential Manager**. It is not saved as a plaintext key file. Do not paste it into ChatGPT, put it in the repository, or commit it to Git.
 
 See the official [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) for organization/workspace associations and permissions.
 
@@ -141,7 +141,11 @@ npm run status
 npm stop
 ```
 
-The Windows scripts manage the bridge, tunnel client, and Gateway startup as configured. The stop script only stops a Gateway process when the project launcher started it and the recorded PID still matches the expected command; it leaves a pre-existing Gateway process running.
+Setup is manual-first: it does not register Windows startup tasks or make the bridge run automatically. To opt in, run `npm run autostart:install`. This registers three independent Scheduled Tasks for the Gateway, bridge stack, and tray companion. The Gateway task launches OpenClaw with the exact state/config paths selected during setup and keeps its own lifecycle; the bridge task starts immediately at sign-in and waits for Gateway RPC readiness before starting the bridge supervisor and Secure MCP Tunnel. This separation prevents a slow Gateway/SQLite startup from being mistaken for a bridge failure. The Gateway and bridge tasks invoke PowerShell through a hidden Windows Script Host launcher so a console tab is not opened when Windows Terminal is the default console host. The Gateway task uses Windows Task Scheduler restart-on-failure settings, while the bridge supervisor restarts only the bridge process. Skip the command to keep startup fully manual.
+
+The optional `ChatGPT OpenClaw Direct Tools Tray` task starts a small Windows notification-area companion at sign-in through a hidden Windows Script Host launcher; neither the launcher nor the tray process opens a console window. It checks the Gateway `/startupz`, bridge `/healthz`, and tunnel `/readyz` endpoints every 3.5 seconds: green means all three are ready, yellow means startup or partial availability, and red means offline or missing configuration. The icon shows a ready notification when the full stack becomes healthy. Right-click it to inspect each component, open the local Monitor, restart the bridge stack, or exit the tray app. Status updates automatically every 3.5 seconds. The companion only observes and controls the stack; it does not own or replace the Gateway or bridge processes. See the OpenClaw [Gateway health checks](https://docs.openclaw.ai/gateway/health) for the endpoint contracts.
+
+`npm stop` stops the bridge supervisor and tunnel client but deliberately leaves the independently managed Gateway running. Use `npm run gateway:stop` to stop the Gateway through its supervisor; to start it again, run `Start-ScheduledTask -TaskName 'OpenClaw Gateway (ChatGPT Bridge)'` in PowerShell. The Gateway task adopts an already-running, verified Gateway process and monitors it, or starts a new one when the port is free. The OpenClaw Tray UI is a separate desktop component and is not managed by either bridge task.
 
 The bridge normally listens on `http://127.0.0.1:19002` and the Gateway on port `19001`; configured values may differ. Open the local call monitor at `http://127.0.0.1:19002/monitor`. Keep the tunnel client running while ChatGPT discovers or calls tools; use `npm run status` to inspect the local stack.
 
@@ -154,7 +158,7 @@ The bridge normally listens on `http://127.0.0.1:19002` and the Gateway on port 
 
 Adding the plugin is separate from running the local bridge and tunnel client. If the tunnel is not listed, verify that it is associated with the target ChatGPT workspace and that your Platform account has Tunnels Read + Use. The project maintainer has successfully connected this bridge using ChatGPT Free. See the [ChatGPT custom MCP server guide](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt) for details.
 
-For Windows sign-in startup, `scripts/windows/start-on-logon.ps1` is the scheduled-task entry point. `scripts/windows/bridge-supervisor.ps1` supervises bridge restarts. `scripts/windows/start-monitor.ps1` is retained as a compatibility alias for the combined launcher.
+When the optional autostart tasks are installed, `scripts/windows/start-on-logon.ps1` is the bridge stack's scheduled-task entry point. `scripts/windows/bridge-supervisor.ps1` supervises bridge restarts. `scripts/windows/start-monitor.ps1` is retained as a compatibility alias for the combined launcher.
 
 ## Tool behavior and boundaries
 
