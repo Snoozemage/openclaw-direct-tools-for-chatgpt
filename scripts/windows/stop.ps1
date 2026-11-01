@@ -77,4 +77,4 @@ $bridgePath = Join-Path ([string]$cfg.repoPath) 'src\server.mjs'
 Stop-BridgeSupervisor
 Stop-OwnedProcess -PidFile $BridgePidFile -ExpectedExecutable ([string]$cfg.nodePath) -ExpectedArgument $bridgePath
 Stop-OwnedProcess -PidFile $TunnelPidFile -ExpectedExecutable ([string]$cfg.tunnelClientPath) -ExpectedArgument 'tunnel-client'
-Write-Host 'Stop complete. OpenClaw Gateway is independently managed and remains running.' -ForegroundColor Cyan
+Write-Host 'Bridge and tunnel shutdown complete. The central service supervisor owns the Gateway lifecycle.' -ForegroundColor Cyan

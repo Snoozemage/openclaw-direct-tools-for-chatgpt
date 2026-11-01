@@ -92,11 +92,11 @@ if (-not $initialTunnelHealthy) {
     }
 }
 
-# Gateway lifecycle is owned by its independent Scheduled Task. This script only waits for readiness.
+# The central service supervisor owns Gateway lifecycle. This script waits for RPC readiness before starting bridge components.
 $gatewayPort = [int]$Cfg.gatewayPort
 $gatewayReady = $false
 $gatewayDeadline = (Get-Date).AddSeconds(300)
-Write-Host "Waiting for independently managed OpenClaw Gateway on 127.0.0.1:$gatewayPort ..."
+Write-Host "Waiting for OpenClaw Gateway managed by the central supervisor on 127.0.0.1:$gatewayPort ..."
 do {
     if (Test-Port $gatewayPort) {
         $gatewayStatusOutput = & ([string]$Cfg.nodePath) ([string]$Cfg.openclawCliPath) gateway status --json 2>&1 | Out-String
@@ -111,7 +111,7 @@ do {
     if (-not $gatewayReady) { Start-Sleep -Seconds 3 }
 } while (-not $gatewayReady -and (Get-Date) -lt $gatewayDeadline)
 if (-not $gatewayReady) {
-    throw "The independent OpenClaw Gateway did not become RPC-ready on port $gatewayPort within 300 seconds. Inspect the 'OpenClaw Gateway (ChatGPT Bridge)' Scheduled Task and gateway-task.log."
+    throw "The OpenClaw Gateway did not become RPC-ready on port $gatewayPort within 300 seconds. Inspect service-supervisor.log and gateway-task.log."
 }
 Write-Host "OpenClaw Gateway is RPC-ready on 127.0.0.1:$gatewayPort; bridge startup may proceed." -ForegroundColor Green
 

@@ -10,6 +10,9 @@ $ConfigFile = Join-Path $AppHome 'config.json'
 $LogDir = Join-Path $AppHome 'logs'
 $LogFile = Join-Path $LogDir 'tray.log'
 $RestartScript = Join-Path $PSScriptRoot 'restart-bridge.ps1'
+$ServiceStopScript = Join-Path $PSScriptRoot 'service-stop.ps1'
+$ServiceStopFile = Join-Path $AppHome 'service.stop'
+$TrayDisabledFile = Join-Path $AppHome 'tray.disabled'
 
 $script:Cfg = $null
 $script:ConfigLastWriteUtc = $null
@@ -98,6 +101,12 @@ function Set-TrayState([string]$State, $Components) {
 }
 
 function Update-TrayStatus {
+    if (Test-Path -LiteralPath $ServiceStopFile) {
+        Write-TrayLog 'Central service shutdown requested.'
+        [Windows.Forms.Application]::Exit()
+        return
+    }
+
     if (-not (Test-Path -LiteralPath $ConfigFile -PathType Leaf)) {
         $script:Cfg = $null
         $script:ConfigLastWriteUtc = $null
@@ -193,6 +202,7 @@ $script:TunnelItem = [Windows.Forms.ToolStripMenuItem]::new('Secure MCP Tunnel: 
 $script:TunnelItem.Enabled = $false
 $script:OpenMonitorItem = [Windows.Forms.ToolStripMenuItem]::new('Open Monitor')
 $script:RestartItem = [Windows.Forms.ToolStripMenuItem]::new('Restart Bridge')
+$script:StopServiceItem = [Windows.Forms.ToolStripMenuItem]::new('Stop OpenClaw Direct Tools')
 $script:ExitItem = [Windows.Forms.ToolStripMenuItem]::new('Exit tray app')
 
 [void]$script:ContextMenu.Items.Add($script:StateItem)
@@ -202,6 +212,7 @@ $script:ExitItem = [Windows.Forms.ToolStripMenuItem]::new('Exit tray app')
 [void]$script:ContextMenu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
 [void]$script:ContextMenu.Items.Add($script:OpenMonitorItem)
 [void]$script:ContextMenu.Items.Add($script:RestartItem)
+[void]$script:ContextMenu.Items.Add($script:StopServiceItem)
 [void]$script:ContextMenu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
 [void]$script:ContextMenu.Items.Add($script:ExitItem)
 
@@ -226,7 +237,23 @@ $script:RestartItem.add_Click({
         Update-TrayStatus
     }
 })
-$script:ExitItem.add_Click({ [Windows.Forms.Application]::Exit() })
+$script:StopServiceItem.add_Click({
+    try {
+        $script:StopServiceItem.Enabled = $false
+        $powerShellExe = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ServiceStopScript + '"'
+        Start-Process -FilePath $powerShellExe -ArgumentList $arguments -WindowStyle Hidden | Out-Null
+        Write-TrayLog 'Central service stop requested from the tray menu.'
+    } catch {
+        $script:StopServiceItem.Enabled = $true
+        Write-TrayLog ('Could not start service shutdown: ' + $_.Exception.Message)
+    }
+})
+$script:ExitItem.add_Click({
+    Set-Content -LiteralPath $TrayDisabledFile -Value 'disabled' -Encoding ASCII
+    Write-TrayLog 'Tray app exit requested by the user.'
+    [Windows.Forms.Application]::Exit()
+})
 $script:NotifyIcon.add_DoubleClick({
     if ($script:MonitorUrl) { Start-Process -FilePath $script:MonitorUrl }
 })

@@ -46,12 +46,6 @@ function Get-GatewayListener {
     return $proc
 }
 
-function Test-GatewayRpc {
-    $output = & $NodePath $CliPath gateway status --json 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) { return $false }
-    try { return [bool](($output | ConvertFrom-Json).rpc.ok) } catch { return $false }
-}
-
 Write-GatewayLog "Gateway supervisor started (PID $PID), port=$Port."
 Push-Location ([string]$cfg.openclawHome)
 try {
@@ -59,28 +53,14 @@ try {
         $existing = Get-GatewayListener
         if ($existing) {
             $gatewayPid = [int]$existing.ProcessId
-            Write-GatewayLog "Adopting existing Gateway process PID $gatewayPid; it will be monitored and stopped only after an explicit Gateway stop request."
-            $readyDeadline = (Get-Date).AddSeconds(300)
-            $rpcReady = $false
-            while ((Get-Date) -lt $readyDeadline) {
-                if (-not (Get-Process -Id $gatewayPid -ErrorAction SilentlyContinue)) { break }
-                if (Test-GatewayRpc) {
-                    $rpcReady = $true
-                    break
-                }
-                Start-Sleep -Seconds 3
+            Write-GatewayLog "Adopting existing verified Gateway process PID $gatewayPid; the central start.ps1 RPC gate validates readiness."
+            while ((Get-Process -Id $gatewayPid -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $StopRequestFile)) { Start-Sleep -Seconds 2 }
+            if (Test-Path -LiteralPath $StopRequestFile) {
+                if (Get-Process -Id $gatewayPid -ErrorAction SilentlyContinue) { Stop-Process -Id $gatewayPid -Force -ErrorAction SilentlyContinue }
+                Write-GatewayLog "Stop requested; terminated verified Gateway PID $gatewayPid."
+                break
             }
-            if (Get-Process -Id $gatewayPid -ErrorAction SilentlyContinue) {
-                if (-not $rpcReady) { throw "Existing Gateway PID $gatewayPid did not become RPC-ready within 300 seconds." }
-                Write-GatewayLog "Existing Gateway PID $gatewayPid is RPC-ready; monitoring its lifetime. An explicit stop request may stop this verified process."
-                while ((Get-Process -Id $gatewayPid -ErrorAction SilentlyContinue) -and -not (Test-Path -LiteralPath $StopRequestFile)) { Start-Sleep -Seconds 2 }
-                if (Test-Path -LiteralPath $StopRequestFile) {
-                    if (Get-Process -Id $gatewayPid -ErrorAction SilentlyContinue) { Stop-Process -Id $gatewayPid -Force -ErrorAction SilentlyContinue }
-                    Write-GatewayLog "Stop requested; terminated verified Gateway PID $gatewayPid."
-                    break
-                }
-                Write-GatewayLog "Adopted Gateway PID $gatewayPid exited; checking whether the port is free for recovery."
-            }
+            Write-GatewayLog "Adopted Gateway PID $gatewayPid exited; checking whether the port is free for recovery."
         } else {
             foreach ($path in @($StdoutLog, $StderrLog)) {
                 if (Test-Path -LiteralPath $path) {
@@ -93,15 +73,19 @@ try {
             $process = Start-Process -FilePath $NodePath -ArgumentList $args -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $StdoutLog -RedirectStandardError $StderrLog -PassThru
             Write-GatewayLog "Started Gateway PID $($process.Id)."
             $readyDeadline = (Get-Date).AddSeconds(300)
-            $ready = $false
-            while ((Get-Date) -lt $readyDeadline) {
+            $listenerReady = $false
+            while ((Get-Date) -lt $readyDeadline -and -not (Test-Path -LiteralPath $StopRequestFile)) {
                 $process.Refresh()
                 if ($process.HasExited) { break }
-                if (Test-GatewayRpc) { $ready = $true; break }
-                Start-Sleep -Seconds 3
+                $listener = Get-GatewayListener
+                if ($listener -and [int]$listener.ProcessId -eq [int]$process.Id) {
+                    $listenerReady = $true
+                    break
+                }
+                Start-Sleep -Seconds 1
             }
-            if ($ready) {
-                Write-GatewayLog "Gateway PID $($process.Id) is RPC-ready; monitoring its lifetime."
+            if ($listenerReady) {
+                Write-GatewayLog "Gateway PID $($process.Id) has bound port $Port; the central start.ps1 gate validates RPC readiness."
                 while (-not $process.HasExited -and -not (Test-Path -LiteralPath $StopRequestFile)) {
                     Start-Sleep -Seconds 2
                     $process.Refresh()
@@ -113,8 +97,8 @@ try {
                 }
             } else {
                 $process.Refresh()
-                $exitCode = if ($process.HasExited) { [string]$process.ExitCode } else { 'readiness-timeout' }
-                Write-GatewayLog "Gateway PID $($process.Id) failed readiness (exit=$exitCode); see gateway.stdout.log and gateway.stderr.log."
+                $exitCode = if ($process.HasExited) { [string]$process.ExitCode } else { 'listener-timeout-or-stop-request' }
+                Write-GatewayLog "Gateway PID $($process.Id) did not bind port $Port (exit=$exitCode); see gateway.stdout.log and gateway.stderr.log."
                 if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
             }
             $process.Refresh()

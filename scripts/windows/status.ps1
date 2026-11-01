@@ -61,8 +61,33 @@ try {
 
     $tunnelIsReady = $tunnel -and (($tunnel -is [string] -and $tunnel.Trim() -eq 'ready') -or $tunnel.status -eq 'ready')
 
+    $servicePidFile = Join-Path $AppHome 'service.pid'
+    $serviceScript = Join-Path $PSScriptRoot 'service-supervisor.ps1'
+    $servicePid = 0
+    $serviceRunning = $false
+    if ((Test-Path -LiteralPath $servicePidFile) -and [int]::TryParse((Get-Content -LiteralPath $servicePidFile -Raw).Trim(), [ref]$servicePid)) {
+        $serviceProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $servicePid" -ErrorAction SilentlyContinue
+        $serviceRunning = [bool]($serviceProcess -and $serviceProcess.ExecutablePath -ieq (Join-Path $PSHOME 'powershell.exe') -and $serviceProcess.CommandLine -and $serviceProcess.CommandLine.IndexOf($serviceScript, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    }
+
+    $startupFolder = [Environment]::GetFolderPath('Startup')
+    $startupShortcut = Join-Path $startupFolder 'OpenClaw Direct Tools.lnk'
+    $startupRegistered = Test-Path -LiteralPath $startupShortcut -PathType Leaf
+    $startupStatus = if ($startupRegistered) { 'registered in Startup folder' } else { 'not registered' }
+
+    # Detect an old Registry Run entry left behind by an interrupted migration.
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    if (Test-Path -LiteralPath $runKey) {
+        $runValues = Get-ItemProperty -LiteralPath $runKey -ErrorAction SilentlyContinue
+        if (-not [string]::IsNullOrWhiteSpace([string]$runValues.'OpenClaw Direct Tools')) {
+            $startupStatus += ' + legacy Run entry present'
+        }
+    }
+
     Write-Host ''
     Write-Host 'OpenClaw Direct Tools for ChatGPT - Status' -ForegroundColor Cyan
+    [pscustomobject]@{Component='Central supervisor';Status=$(if ($serviceRunning) {'running'} else {'stopped'});Endpoint=$(if ($serviceRunning) { 'PID ' + $servicePid } else { 'service.pid unavailable' })} | Format-Table -AutoSize
+    [pscustomobject]@{Component='Task Manager Startup';Status=$startupStatus;Endpoint=$startupShortcut} | Format-Table -AutoSize
     [pscustomobject]@{Component='OpenClaw Gateway';Status=$(if ($gatewayOk) {'reachable'} else {'offline'});Endpoint=('127.0.0.1:' + $cfg.gatewayPort)} | Format-Table -AutoSize
     [pscustomobject]@{Component='MCP bridge';Status=$(if ($bridge -and $bridge.ok) {'running'} else {'offline'});Endpoint=$bridgeUrl} | Format-Table -AutoSize
     [pscustomobject]@{Component='Overview dashboard';Status=$(if ($bridge -and $bridge.ok) {'available'} else {'offline'});Endpoint=($bridgeUrl + '/monitor')} | Format-Table -AutoSize

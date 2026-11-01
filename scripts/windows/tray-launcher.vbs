@@ -11,6 +11,6 @@ trayScript = scriptDirectory & "\tray-app.ps1"
 
 command = """" & powerShellPath & """ -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & trayScript & """"
 
-' Run with window style 0 (hidden) and wait so Task Scheduler tracks the tray app lifecycle.
+' Run hidden and wait so the central service supervisor can track the tray companion lifecycle.
 exitCode = shell.Run(command, 0, True)
 WScript.Quit exitCode
