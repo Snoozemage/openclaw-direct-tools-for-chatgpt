@@ -18,7 +18,7 @@ function Assert-Check([bool]$Condition, [string]$Name, [string]$Details = '') {
 
 function Send-Mcp([int]$Id, [string]$Method, [hashtable]$Params = @{}) {
     $body = @{ jsonrpc = '2.0'; id = $Id; method = $Method; params = $Params } | ConvertTo-Json -Depth 20
-    $response = Invoke-WebRequest -Uri ($script:base + '/mcp') -Method Post -ContentType 'application/json' -Headers @{ Accept = 'application/json, text/event-stream' } -Body $body -TimeoutSec 60
+    $response = Invoke-WebRequest -UseBasicParsing -Uri ($script:base + '/mcp') -Method Post -ContentType 'application/json' -Headers @{ Accept = 'application/json, text/event-stream' } -Body $body -TimeoutSec 60
     $contentType = [string]$response.Headers['Content-Type']
     if ($contentType -match 'text/event-stream') {
         $dataLine = $response.Content -split '\r?\n' | Where-Object { $_.StartsWith('data:') } | Select-Object -Last 1
@@ -34,11 +34,11 @@ try {
 } catch { Assert-Check $false 'Bridge health endpoint' $_.Exception.Message }
 
 try {
-    $initialized = Send-Mcp -Id 1 -Method 'initialize' -Params @{ protocolVersion = '2025-03-26'; capabilities = @{} }
+    $initialized = Send-Mcp -Id 1 -Method 'initialize' -Params @{ protocolVersion = '2025-03-26'; capabilities = @{}; clientInfo = @{ name = 'openclaw-direct-tools-smoke-test'; version = '0.1.0' } }
     Assert-Check ($initialized.result.serverInfo.name -eq 'openclaw-chatgpt-bridge') 'MCP initialize and server identity'
     $instructions = [string]$initialized.result.instructions
-    $instructionsStructured = $instructions.Contains('start_here') -and $instructions.Contains('# Tool routing') -and $instructions.Contains('project_manage') -and $instructions.Contains('subagent_run')
-    Assert-Check $instructionsStructured 'MCP initialization exposes the full OpenChatX-derived instructions'
+    $instructionsStructured = $instructions.Contains('start_here') -and $instructions.Contains('# Tool routing') -and $instructions.Contains('openclaw_tool_search') -and $instructions.Contains('openclaw_dispatch_action')
+    Assert-Check $instructionsStructured 'MCP initialization exposes the bridge routing instructions'
 } catch { Assert-Check $false 'MCP initialize' $_.Exception.Message }
 
 try {
@@ -136,16 +136,12 @@ try {
 } catch { Assert-Check $false 'Browser profiles action' $_.Exception.Message }
 
 try {
-    # Unsupported input should produce an OpenClaw response rather than a bridge_validation_error.
-    $null = Send-Mcp -Id 4 -Method 'tools/call' -Params @{ name = 'openclaw_browser'; arguments = @{ action = '__not_a_browser_action__' } }
-    $eventData = Invoke-RestMethod -Uri ($base + '/api/events') -TimeoutSec 5
-    $event = @($eventData.events | Where-Object { $_.requestId -eq '4' }) | Select-Object -Last 1
-    $eventJson = ConvertTo-Json -InputObject $event -Depth 20 -Compress
-    $reachedGateway = $null -ne $event -and -not $eventJson.Contains('bridge_validation') -and (
-        $null -ne $event.diagnostics.httpStatus -or $null -ne $event.diagnostics.elapsedMs
-    )
-    Assert-Check $reachedGateway 'Unsupported Browser action is handled by OpenClaw, not bridge validation'
-} catch { Assert-Check $false 'Native error passthrough' $_.Exception.Message }
+    # The MCP SDK rejects an action outside the published enum before the bridge dispatches it.
+    $unsupported = Send-Mcp -Id 4 -Method 'tools/call' -Params @{ name = 'openclaw_browser'; arguments = @{ action = '__not_a_browser_action__' } }
+    $unsupportedText = @($unsupported.result.content | Where-Object { $_.type -eq 'text' } | ForEach-Object { $_.text }) -join ' '
+    $schemaRejected = [bool]$unsupported.result.isError -and $unsupportedText.Contains('Input validation error') -and $unsupportedText.Contains('allowed values')
+    Assert-Check $schemaRejected 'Unsupported Browser actions are rejected by the MCP schema before dispatch'
+} catch { Assert-Check $false 'Unsupported Browser action validation' $_.Exception.Message }
 
 try {
     # Regression case: the bridge must not impose an HTTP(S)-only URL policy.
@@ -170,12 +166,14 @@ try {
 
 try {
     $monitorHtml = (Invoke-WebRequest -UseBasicParsing -Uri ($base + '/monitor') -TimeoutSec 5).Content
-    Assert-Check ($monitorHtml.Contains('id="clear"') -and $monitorHtml.Contains('/api/events/clear')) 'Monitor UI exposes Clear'
-    Assert-Check ($monitorHtml.Contains('id="sessions"') -and $monitorHtml.Contains('/api/sessions') -and $monitorHtml.Contains('Needs start_here')) 'Monitor UI exposes per-chat sessions'
-    Assert-Check (-not $monitorHtml.Contains('confirm(')) 'Monitor Clear requires no confirmation dialog'
-    $copyUiValid = $monitorHtml.Contains('id="copy"') -and $monitorHtml.Contains('Copy log') -and $monitorHtml.Contains('navigator.clipboard.writeText') -and $monitorHtml.Contains('copyHistory') -and -not $monitorHtml.Contains('id="export"')
-    Assert-Check $copyUiValid 'Monitor UI copies events to clipboard'
-    $independentScroll = $monitorHtml.Contains('height:calc(100vh - 68px);min-height:0;overflow:hidden') -and $monitorHtml.Contains('overflow-y:auto;overscroll-behavior:contain') -and $monitorHtml.Contains('height:100%;overflow-y:auto')
+    $monitorJs = (Invoke-WebRequest -UseBasicParsing -Uri ($base + '/monitor/assets/monitor.js') -TimeoutSec 5).Content
+    $monitorCss = (Invoke-WebRequest -UseBasicParsing -Uri ($base + '/monitor/assets/monitor.css') -TimeoutSec 5).Content
+    Assert-Check ($monitorHtml.Contains('id="clear"') -and $monitorJs.Contains('/api/events/clear')) 'Monitor UI exposes Clear'
+    Assert-Check ($monitorHtml.Contains('id="sessions"') -and $monitorJs.Contains('/api/sessions') -and $monitorJs.Contains('Needs start_here')) 'Monitor UI exposes per-chat sessions'
+    Assert-Check (-not ($monitorHtml + $monitorJs).Contains('confirm(')) 'Monitor Clear requires no confirmation dialog'
+    $copyUiValid = $monitorJs.Contains('data-copy-call') -and $monitorJs.Contains('data-copy-session') -and $monitorJs.Contains('Copy tool call as JSON') -and $monitorJs.Contains('navigator.clipboard.writeText') -and $monitorJs.Contains('document.execCommand("copy")')
+    Assert-Check $copyUiValid 'Monitor UI copies individual tool calls and sessions'
+    $independentScroll = $monitorCss.Contains('height:calc(100vh - 68px);min-height:0;overflow:hidden') -and $monitorCss.Contains('height:100%;overflow-y:auto;overscroll-behavior:contain')
     Assert-Check $independentScroll 'Monitor event list and detail use independent scroll panes'
 } catch { Assert-Check $false 'Monitor UI' $_.Exception.Message }
 
