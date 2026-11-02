@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $StartupValueName = 'OpenClaw Direct Tools'
 $LauncherSource = Join-Path $PSScriptRoot 'startup-launcher.cs'
-$ServiceStartScript = Join-Path $PSScriptRoot 'service-start.ps1'
+$CredentialStoreSource = Join-Path $PSScriptRoot 'WindowsCredentialStore.cs'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $IconPath = Join-Path $RepoRoot 'assets\openclaw-direct-tools.ico'
 $LauncherExecutable = Join-Path $RepoRoot 'assets\OpenClaw Direct Tools.exe'
@@ -23,7 +23,7 @@ $LegacyTaskNames = @(
     'OpenClaw Gateway (ChatGPT Bridge)'
 )
 
-foreach ($path in @($LauncherSource, $ServiceStartScript, $IconPath)) {
+foreach ($path in @($LauncherSource, $CredentialStoreSource, $IconPath)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required startup file not found: $path" }
 }
 if (-not (Test-Path -LiteralPath $StartupFolder -PathType Container)) {
@@ -31,7 +31,7 @@ if (-not (Test-Path -LiteralPath $StartupFolder -PathType Container)) {
 }
 
 if ($CompilerPath) {
-    & $CompilerPath /nologo /target:winexe /optimize+ ("/out:" + $LauncherExecutable) ("/win32icon:" + $IconPath) $LauncherSource
+    & $CompilerPath /nologo /target:winexe /optimize+ ("/out:" + $LauncherExecutable) ("/win32icon:" + $IconPath) $LauncherSource $CredentialStoreSource
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $LauncherExecutable -PathType Leaf)) {
         throw "Could not build the branded startup launcher (compiler exit=$LASTEXITCODE)."
     }

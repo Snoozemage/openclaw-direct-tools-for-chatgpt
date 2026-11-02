@@ -170,16 +170,17 @@ function Update-TrayStatus {
     $script:ReadyWasShown = [bool]$allReady
 }
 
-if (-not ('ChatGPTDirectToolsTrayNative' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public static class ChatGPTDirectToolsTrayNative {
-    [DllImport("user32.dll", SetLastError = true)]
-    public static extern bool DestroyIcon(IntPtr handle);
+$launcherExecutable = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\assets\OpenClaw Direct Tools.exe'))
+if (-not (Test-Path -LiteralPath $launcherExecutable -PathType Leaf)) {
+    throw "Bundled native helper assembly not found: $launcherExecutable"
 }
-'@
-}
+$launcherAssembly = [Reflection.Assembly]::LoadFrom($launcherExecutable)
+$nativeMethodsType = $launcherAssembly.GetType('OpenClawDirectToolsNativeMethods', $true)
+$script:DestroyIconMethod = $nativeMethodsType.GetMethod(
+    'DestroyIcon',
+    [Reflection.BindingFlags]::Public -bor [Reflection.BindingFlags]::Static
+)
+if ($null -eq $script:DestroyIconMethod) { throw 'The bundled launcher does not expose DestroyIcon.' }
 
 $script:Icons = @{
     Ready = New-StatusIcon ([Drawing.Color]::FromArgb(34, 197, 94))
@@ -275,7 +276,7 @@ try {
     foreach ($entry in $script:Icons.Values) {
         try {
             $entry.Icon.Dispose()
-            [void][ChatGPTDirectToolsTrayNative]::DestroyIcon([IntPtr]$entry.Handle)
+            [void]$script:DestroyIconMethod.Invoke($null, [object[]]@([IntPtr]$entry.Handle))
         } catch {}
     }
     Write-TrayLog 'Tray companion stopped.'

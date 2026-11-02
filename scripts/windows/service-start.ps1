@@ -9,9 +9,11 @@ $StopFile = Join-Path $AppHome 'service.stop'
 $LogDir = Join-Path $AppHome 'logs'
 $PowerShell = Join-Path $PSHOME 'powershell.exe'
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
+$LauncherExecutable = Join-Path $RepoRoot 'assets\OpenClaw Direct Tools.exe'
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 if (-not (Test-Path -LiteralPath $SupervisorScript -PathType Leaf)) { throw "Service supervisor not found: $SupervisorScript" }
+if (-not (Test-Path -LiteralPath $LauncherExecutable -PathType Leaf)) { throw "Service guardian executable not found: $LauncherExecutable" }
 
 function Get-OwnedSupervisor([int]$ProcessId = 0) {
     if ($ProcessId -le 0) {
@@ -38,26 +40,27 @@ if ($existing) {
 }
 
 Remove-Item -LiteralPath $StopFile -Force -ErrorAction SilentlyContinue
-$arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $SupervisorScript + '"'
-$process = Start-Process -FilePath $PowerShell -ArgumentList $arguments -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
+$guardian = Start-Process -FilePath $LauncherExecutable -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru
 
 $deadline = (Get-Date).AddSeconds(12)
 do {
     Start-Sleep -Milliseconds 250
-    $owned = Get-OwnedSupervisor $process.Id
-    if ($owned -and (Test-Path -LiteralPath $PidFile)) {
-        Write-Host "OpenClaw Direct Tools started (PID $($process.Id))." -ForegroundColor Green
+    $owned = Get-OwnedSupervisor
+    if ($owned) {
+        Write-Host "OpenClaw Direct Tools started (supervisor PID $($owned.ProcessId); guardian PID $($guardian.Id))." -ForegroundColor Green
         return
     }
 
-    $process.Refresh()
-    if ($process.HasExited) {
-        $log = Join-Path $LogDir 'service-supervisor.log'
-        if (Test-Path -LiteralPath $log) {
-            Write-Host ((Get-Content -LiteralPath $log -Tail 20) -join [Environment]::NewLine) -ForegroundColor Yellow
+    $guardian.Refresh()
+    if ($guardian.HasExited) {
+        foreach ($logName in @('startup-launcher.log', 'service-supervisor.log')) {
+            $log = Join-Path $LogDir $logName
+            if (Test-Path -LiteralPath $log) {
+                Write-Host ((Get-Content -LiteralPath $log -Tail 20) -join [Environment]::NewLine) -ForegroundColor Yellow
+            }
         }
-        throw "Service supervisor exited during startup (code $($process.ExitCode))."
+        throw "Service guardian exited during startup (code $($guardian.ExitCode))."
     }
 } while ((Get-Date) -lt $deadline)
 
-throw "Service supervisor did not publish its PID file within 12 seconds. Inspect $(Join-Path $LogDir 'service-supervisor.log')."
+throw "Service guardian did not publish a valid supervisor PID within 12 seconds. Inspect the logs in $LogDir."
