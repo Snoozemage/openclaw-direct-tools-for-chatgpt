@@ -4,9 +4,45 @@ import {
   beginToolEvent,
   clearMonitorEvents,
   finishToolEvent,
+  getCurrentToolActivity,
   monitorEvents,
   removeMonitorEventsForSession,
 } from "../src/monitor/events.mjs";
+
+test("tool activity distinguishes regular MCP calls from computer use and returns to idle", () => {
+  clearMonitorEvents();
+  const regularCall = beginToolEvent("openclaw_read", {}, "activity-regular");
+  assert.deepEqual(getCurrentToolActivity(), {
+    state: "tool",
+    activeCount: 1,
+    computerCount: 0,
+    toolCount: 1,
+  });
+
+  const computerCall = beginToolEvent("openclaw_computer", { action: "snapshot" }, "activity-computer");
+  assert.deepEqual(getCurrentToolActivity(), {
+    state: "computer",
+    activeCount: 2,
+    computerCount: 1,
+    toolCount: 1,
+  });
+
+  finishToolEvent(computerCall, { content: [{ type: "text", text: "snapshot complete" }] });
+  assert.deepEqual(getCurrentToolActivity(), {
+    state: "tool",
+    activeCount: 1,
+    computerCount: 0,
+    toolCount: 1,
+  });
+
+  finishToolEvent(regularCall, { content: [{ type: "text", text: "read complete" }] });
+  assert.deepEqual(getCurrentToolActivity(), {
+    state: "idle",
+    activeCount: 0,
+    computerCount: 0,
+    toolCount: 0,
+  });
+});
 
 test("removing a session deletes its retained logs and suppresses completion of its in-flight calls", () => {
   clearMonitorEvents();

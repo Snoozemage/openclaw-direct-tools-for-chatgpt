@@ -23,6 +23,9 @@ $script:EverReady = $false
 $script:ReadyWasShown = $false
 $script:RestartUntil = $null
 $script:LastState = $null
+$script:BaseIconKey = 'Pending'
+$script:ActivityIconKey = $null
+$script:BridgeAvailable = $false
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
@@ -58,22 +61,42 @@ function Get-ComponentStatus {
     return [pscustomobject]$status
 }
 
-function New-StatusIcon([Drawing.Color]$Color) {
+function New-StatusIcon([Drawing.Color]$Color, [string]$Glyph = 'dot') {
     $bitmap = [Drawing.Bitmap]::new(32, 32)
     $graphics = [Drawing.Graphics]::FromImage($bitmap)
     $brush = [Drawing.SolidBrush]::new($Color)
     $border = [Drawing.Pen]::new([Drawing.Color]::White, 2)
+    $symbolBrush = [Drawing.SolidBrush]::new([Drawing.Color]::White)
+    $symbolPen = [Drawing.Pen]::new([Drawing.Color]::White, 2.6)
     try {
         $graphics.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
         $graphics.Clear([Drawing.Color]::Transparent)
         $graphics.FillEllipse($brush, 3, 3, 26, 26)
         $graphics.DrawEllipse($border, 3, 3, 26, 26)
+
+        if ($Glyph -eq 'tool') {
+            $symbolPen.StartCap = [Drawing.Drawing2D.LineCap]::Round
+            $symbolPen.EndCap = [Drawing.Drawing2D.LineCap]::Round
+            $graphics.DrawLine($symbolPen, 10, 22, 20, 12)
+            $graphics.DrawLine($symbolPen, 17, 8, 23, 14)
+            $graphics.DrawLine($symbolPen, 19, 7, 25, 13)
+            $graphics.FillEllipse($symbolBrush, 7, 19, 6, 6)
+        } elseif ($Glyph -eq 'computer') {
+            $symbolPen.Width = 2
+            $graphics.DrawRectangle($symbolPen, 7, 8, 18, 13)
+            $graphics.FillRectangle($symbolBrush, 10, 11, 12, 7)
+            $graphics.DrawLine($symbolPen, 16, 21, 16, 24)
+            $graphics.DrawLine($symbolPen, 11, 25, 21, 25)
+        }
+
         $handle = $bitmap.GetHicon()
         return [pscustomobject]@{
             Icon = [Drawing.Icon]::FromHandle($handle)
             Handle = $handle
         }
     } finally {
+        $symbolPen.Dispose()
+        $symbolBrush.Dispose()
         $border.Dispose()
         $brush.Dispose()
         $graphics.Dispose()
@@ -81,13 +104,30 @@ function New-StatusIcon([Drawing.Color]$Color) {
     }
 }
 
+function Update-TrayIcon {
+    $iconKey = $script:BaseIconKey
+    $tooltipState = $script:LastState
+    if ($script:ActivityIconKey -eq 'Computer') {
+        $iconKey = 'Computer'
+        $tooltipState = 'Computer in use'
+    } elseif ($script:ActivityIconKey -eq 'Tool') {
+        $iconKey = 'Tool'
+        $tooltipState = 'Tool call running'
+    }
+
+    $script:NotifyIcon.Icon = $script:Icons[$iconKey].Icon
+    $script:NotifyIcon.Text = 'OpenClaw Direct Tools: ' + $tooltipState
+}
+
 function Set-TrayState([string]$State, $Components) {
     if ($State -eq 'READY') { $iconKey = 'Ready' }
     elseif ($State -eq 'OFFLINE' -or $State -eq 'CONFIG MISSING') { $iconKey = 'Offline' }
     else { $iconKey = 'Pending' }
 
-    $script:NotifyIcon.Icon = $script:Icons[$iconKey].Icon
-    $script:NotifyIcon.Text = 'OpenClaw Direct Tools: ' + $State
+    $script:BaseIconKey = $iconKey
+    $script:BridgeAvailable = [bool]($Components.Configured -and $Components.Bridge)
+    if (-not $script:BridgeAvailable) { $script:ActivityIconKey = $null }
+    Update-TrayIcon
     $script:StateItem.Text = 'Status: ' + $State
     $script:GatewayItem.Text = 'Gateway: ' + $(if ($Components.Configured -and $Components.Gateway) { 'Started' } elseif ($Components.Configured) { 'Not ready' } else { 'Unknown' })
     $script:BridgeItem.Text = 'MCP Bridge: ' + $(if ($Components.Configured -and $Components.Bridge) { 'Healthy' } elseif ($Components.Configured) { 'Not ready' } else { 'Unknown' })
@@ -97,6 +137,25 @@ function Set-TrayState([string]$State, $Components) {
     if ($State -ne $script:LastState) {
         Write-TrayLog ('State changed: ' + $State + '; Gateway=' + $Components.Gateway + '; Bridge=' + $Components.Bridge + '; Tunnel=' + $Components.Tunnel)
         $script:LastState = $State
+    }
+}
+
+function Update-TrayActivity {
+    $newIconKey = $null
+    if ($script:BridgeAvailable -and $null -ne $script:Cfg) {
+        $activityUrl = 'http://127.0.0.1:' + [int]$script:Cfg.bridgePort + '/api/activity'
+        $activity = Get-Json $activityUrl
+        if ($null -eq $activity) { return }
+
+        if ([int]$activity.computerCount -gt 0) { $newIconKey = 'Computer' }
+        elseif ([int]$activity.activeCount -gt 0) { $newIconKey = 'Tool' }
+    }
+
+    if ($newIconKey -ne $script:ActivityIconKey) {
+        $script:ActivityIconKey = $newIconKey
+        Update-TrayIcon
+        $activityLabel = if ($newIconKey) { $newIconKey } else { 'Idle' }
+        Write-TrayLog ('Activity changed: ' + $activityLabel)
     }
 }
 
@@ -186,6 +245,8 @@ $script:Icons = @{
     Ready = New-StatusIcon ([Drawing.Color]::FromArgb(34, 197, 94))
     Pending = New-StatusIcon ([Drawing.Color]::FromArgb(234, 179, 8))
     Offline = New-StatusIcon ([Drawing.Color]::FromArgb(239, 68, 68))
+    Tool = New-StatusIcon ([Drawing.Color]::FromArgb(59, 130, 246)) 'tool'
+    Computer = New-StatusIcon ([Drawing.Color]::FromArgb(147, 51, 234)) 'computer'
 }
 
 $script:NotifyIcon = [Windows.Forms.NotifyIcon]::new()
@@ -264,11 +325,19 @@ $script:Timer.Interval = 3500
 $script:Timer.add_Tick({ Update-TrayStatus })
 $script:Timer.Start()
 
+$script:ActivityTimer = [Windows.Forms.Timer]::new()
+$script:ActivityTimer.Interval = 500
+$script:ActivityTimer.add_Tick({ Update-TrayActivity })
+$script:ActivityTimer.Start()
+
 Write-TrayLog 'Tray companion started.'
 Update-TrayStatus
+Update-TrayActivity
 try {
     [Windows.Forms.Application]::Run()
 } finally {
+    $script:ActivityTimer.Stop()
+    $script:ActivityTimer.Dispose()
     $script:Timer.Stop()
     $script:NotifyIcon.Visible = $false
     $script:NotifyIcon.Dispose()

@@ -7,7 +7,7 @@ import {
   toNodeHandler,
 } from "@modelcontextprotocol/node";
 import { host, port, gatewayPort } from "./config/runtime.mjs";
-import { monitorEvents, eventClients, clearMonitorEvents, publishMonitorSignal } from "./monitor/events.mjs";
+import { monitorEvents, eventClients, clearMonitorEvents, getCurrentToolActivity, publishMonitorSignal } from "./monitor/events.mjs";
 import { clearSessionsFromMonitor, listSessions, removeSessionFromMonitor } from "./mcp/session-registry.mjs";
 import { mcpHandler } from "./mcp/sdk-server.mjs";
 
@@ -75,6 +75,10 @@ const httpServer = createServer(async (req, res) => {
   }
   if (req.method === "GET" && pathname === "/api/events") {
     sendJson(res, 200, { events: monitorEvents.slice(-200) });
+    return;
+  }
+  if (req.method === "GET" && pathname === "/api/activity") {
+    sendJson(res, 200, getCurrentToolActivity());
     return;
   }
   if (req.method === "GET" && pathname === "/api/sessions") {

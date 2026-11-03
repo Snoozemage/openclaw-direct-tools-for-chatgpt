@@ -3,6 +3,7 @@ export const eventClients = new Set();
 let nextEventId = 1;
 let firstRetainedEventId = 1;
 const firstRetainedEventIdBySession = new Map();
+const activeToolEvents = new Map();
 
 function redact(value, key = "") {
   if (/secret|token|password|api.?key|authorization|cookie|credential/i.test(key)) return "[REDACTED]";
@@ -37,6 +38,21 @@ export function publishMonitorSignal(signal) {
   for (const client of eventClients) { try { client.write(message); } catch { eventClients.delete(client); } }
 }
 
+export function getCurrentToolActivity() {
+  const active = [...activeToolEvents.values()];
+  const computerCount = active.filter((event) => event.tool === "openclaw_computer").length;
+  return {
+    state: computerCount > 0 ? "computer" : active.length > 0 ? "tool" : "idle",
+    activeCount: active.length,
+    computerCount,
+    toolCount: active.length - computerCount,
+  };
+}
+
+function publishToolActivity() {
+  publishMonitorSignal({ type: "activity", activity: getCurrentToolActivity() });
+}
+
 export function clearMonitorEvents() {
   const clearedCount = monitorEvents.length;
   monitorEvents.length = 0;
@@ -61,7 +77,9 @@ export function removeMonitorEventsForSession(sessionId) {
 export function beginToolEvent(tool, args, requestId, session) {
   const event = { id: nextEventId++, requestId: String(requestId ?? ""), tool, arguments: redact(args), command: redact(eventCommand(args)), method: args?.method, status: "running", startedAt: new Date().toISOString(), finishedAt: null, durationMs: null, output: null, error: null };
   applySession(event, session);
+  activeToolEvents.set(event.id, { id: event.id, tool });
   publishEvent(event);
+  publishToolActivity();
   return event;
 }
 
@@ -118,4 +136,6 @@ export function finishToolEvent(event, result, error, session) {
     } else event.output = redact(result);
   }
   publishEvent(event);
+  activeToolEvents.delete(event.id);
+  publishToolActivity();
 }
