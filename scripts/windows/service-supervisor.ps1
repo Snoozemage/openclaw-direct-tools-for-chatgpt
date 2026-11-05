@@ -2,6 +2,30 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+
+function Import-UserEnvironment {
+    # Startup launchers can inherit a stale or reduced PATH from Explorer.
+    # Re-read the persisted user PATH so every supervised child sees the same tools as the user shell.
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $pathEntries = @()
+    if (-not [string]::IsNullOrWhiteSpace($userPath)) { $pathEntries += $userPath -split ';' }
+    if (-not [string]::IsNullOrWhiteSpace($env:PATH)) { $pathEntries += $env:PATH -split ';' }
+
+    $seenPaths = @{}
+    $mergedPath = foreach ($entry in $pathEntries) {
+        $value = ([string]$entry).Trim().Trim('"')
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+        $key = $value.TrimEnd([char]92)
+        if (-not $seenPaths.ContainsKey($key)) {
+            $seenPaths[$key] = $true
+            $value
+        }
+    }
+    $env:PATH = $mergedPath -join ';'
+
+}
+
+Import-UserEnvironment
 $RepoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 $AppHome = Join-Path $env:LOCALAPPDATA 'OpenClawChatGPTBridge'
 $ConfigFile = Join-Path $AppHome 'config.json'
