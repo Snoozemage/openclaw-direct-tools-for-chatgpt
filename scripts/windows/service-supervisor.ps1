@@ -92,11 +92,18 @@ function Start-ChildScript([string]$ScriptPath, [string]$Name, [string]$ExtraArg
     $stdout = Join-Path $LogDir ($Name + '.stdout.log')
     $stderr = Join-Path $LogDir ($Name + '.stderr.log')
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
-    foreach ($path in @($stdout, $stderr)) {
-        if (Test-Path -LiteralPath $path) {
-            Move-Item -LiteralPath $path -Destination ($path + '.' + $stamp + '.previous') -Force
+    foreach ($stream in @('stdout', 'stderr')) {
+        $path = if ($stream -eq 'stdout') { $stdout } else { $stderr }
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        try {
+            Move-Item -LiteralPath $path -Destination ($path + '.' + $stamp + '.previous') -Force -ErrorAction Stop
+        } catch [System.IO.IOException] {
+            $fallback = Join-Path $LogDir ($Name + '.' + $stamp + '.' + [Guid]::NewGuid().ToString('N').Substring(0, 8) + '.' + $stream + '.log')
+            Write-ServiceLog ('Log is in use; using alternate output file: ' + $fallback)
+            if ($stream -eq 'stdout') { $stdout = $fallback } else { $stderr = $fallback }
         }
     }
+    if ($Name -eq 'stack-start') { $script:StartStderrPath = $stderr }
     $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $ScriptPath + '"'
     if (-not [string]::IsNullOrWhiteSpace($ExtraArguments)) { $arguments += ' ' + $ExtraArguments }
     Start-Process -FilePath $PowerShell -ArgumentList $arguments -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
@@ -152,8 +159,8 @@ function Invoke-StackStart {
                 }
 
                 $detail = ''
-                $stderr = Join-Path $LogDir 'stack-start.stderr.log'
-                if (Test-Path -LiteralPath $stderr) {
+                $stderr = $script:StartStderrPath
+                if ($stderr -and (Test-Path -LiteralPath $stderr)) {
                     $detail = (Get-Content -LiteralPath $stderr -Tail 35 -ErrorAction SilentlyContinue) -join ' | '
                 }
                 Write-ServiceLog ("Stack reconciliation failed (exit=" + $exit + '). ' + $detail)
