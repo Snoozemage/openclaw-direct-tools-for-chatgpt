@@ -1,6 +1,7 @@
 import { invokeGatewayTool, getRecentGatewayToolErrorLog, shouldCollectGatewayErrorLogs } from "../../openclaw-client.mjs";
 import { normalizeToolOutput } from "../../mcp/format.mjs";
 import { browserToolDefinition } from "./schema.mjs";
+import { browserCursorPreference } from "./cursor-preference.mjs";
 import { ensurePersonalChromeRunning } from "./chrome-launch.mjs";
 import { ADVANCED_BROWSER_ACTIONS } from "./advanced-routes.mjs";
 import { invokeAdvancedBrowser } from "./advanced.mjs";
@@ -65,6 +66,25 @@ async function claimFeedbackTab(targetId, url = null) {
       fn:browserFeedbackFunction({deactivate:true}),timeoutMs:3000,
     });
   } catch {  }
+}
+
+export async function setBrowserCursorEnabled(enabled) {
+  await browserCursorPreference.setEnabled(enabled);
+  if (!activeFeedbackTab) return { enabled, appliedToTab: false };
+  try {
+    const result = await invokeGatewayTool("browser", {
+      action: "act", kind: "evaluate", profile: "chrome", targetId: activeFeedbackTab,
+      fn: browserFeedbackFunction(enabled
+        ? { enabled: true, force: true, kind: "ready" }
+        : { enabled: false }),
+      timeoutMs: 3000,
+    }, undefined, 4000);
+    const applied = result.ok && !readNativeErrors(result.output).length;
+    if (applied && enabled) activeFeedbackSyncedAt = Date.now();
+    return { enabled, appliedToTab: applied };
+  } catch {
+    return { enabled, appliedToTab: false };
+  }
 }
 
 async function watchLinkNavigation(context, targetId, isStopped) {
@@ -186,6 +206,7 @@ export async function handleBrowserTool(name, args = {}) {
   if (name !== browserToolDefinition.name) return undefined;
 
   let nativeArgs = prepareBrowserArgs(args);
+  const cursorEnabled = await browserCursorPreference.getEnabled().catch(() => true);
   if (args.action === "act" && args.kind === "batch"
     && Array.isArray(args.actions) && args.actions.length > 1) {
     const steps = args.actions;
@@ -239,7 +260,7 @@ export async function handleBrowserTool(name, args = {}) {
   if (args.action === "effects") {
     const result = await invokeGatewayTool("browser", {
       ...nativeArgs, action: "act", kind: "evaluate",
-      fn: browserFeedbackFunction({ enabled: args.enabled !== false, force: true }),
+      fn: browserFeedbackFunction({ enabled: cursorEnabled && args.enabled !== false, force: true }),
     });
     const errors = result.ok ? readNativeErrors(result.output) : [];
     if (result.ok && !errors.length) {
@@ -278,7 +299,8 @@ export async function handleBrowserTool(name, args = {}) {
   const eligibleClick = args.action === "act" && args.kind === "click"
     && !args.doubleClick && (!args.button || args.button === "left")
     && !args.modifiers?.length;
-  if (shouldShowBrowserFeedback(args)) {
+  const showFeedback = cursorEnabled && shouldShowBrowserFeedback(args);
+  if (showFeedback) {
     const { ref, options } = feedbackOptions(args);
     try {
       const probe = await invokeGatewayTool("browser", {
@@ -301,7 +323,7 @@ export async function handleBrowserTool(name, args = {}) {
     } catch (error) { feedback = { available: false, reason: error.message }; }
   }
   if (args.action === "act" && args.kind === "click" && !clickContext
-    && !shouldShowBrowserFeedback(args)) {
+    && !showFeedback) {
     try {
       const probe = await invokeGatewayTool("browser", {
         action: "act", kind: "evaluate", profile: "chrome",
@@ -343,7 +365,8 @@ export async function handleBrowserTool(name, args = {}) {
   if (first.kind === "navigation") {
     if (feedback?.available) await finishBrowserFeedback(nativeArgs);
     if (activeFeedbackTab === nativeArgs.targetId) {
-      activeFeedbackTab = null; activeFeedbackSyncedAt = 0; activeFeedbackDocumentUrl = null;
+      // Keep the last controlled tab for tray toggles, but invalidate URL reuse.
+      activeFeedbackSyncedAt = 0; activeFeedbackDocumentUrl = null;
     }
     return {
       content: [{ type: "text", text: JSON.stringify({
@@ -397,7 +420,7 @@ export async function handleBrowserTool(name, args = {}) {
     };
   }
   if (!failed && ["open","focus","navigate","snapshot","text","screenshot"].includes(args.action)
-    && args.visualFeedback !== false) {
+    && args.visualFeedback !== false && cursorEnabled) {
     const details = readFeedbackDetails(result.output);
     const tab = details.tabId ?? nativeArgs.targetId ?? details.targetId;
     const readOnlyAction = ["snapshot","text","screenshot"].includes(args.action);

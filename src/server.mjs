@@ -12,6 +12,8 @@ import { clearSessionsFromMonitor, listSessions, removeSessionFromMonitor } from
 import { mcpHandler } from "./mcp/sdk-server.mjs";
 import { disposeConfiguredMcpRuntime } from "./tools/runtime/configured-mcp.mjs";
 import { screenBorder } from "./monitor/screen-border.mjs";
+import { browserCursorPreference } from "./tools/browser/cursor-preference.mjs";
+import { setBrowserCursorEnabled } from "./tools/browser/handler.mjs";
 import { bridgeRestart } from "./bridge-restart.mjs";
 
 const nodeMcpHandler = toNodeHandler(mcpHandler, {
@@ -85,6 +87,43 @@ const httpServer = createServer(async (req, res) => {
   }
   if (req.method === "GET" && pathname === "/api/activity") {
     sendJson(res, 200, getCurrentToolActivity());
+    return;
+  }
+  if (req.method === "GET" && pathname === "/api/browser-cursor") {
+    try {
+      sendJson(res, 200, { ok: true, enabled: await browserCursorPreference.getEnabled() });
+    } catch {
+      sendJson(res, 500, { error: "Could not read browser cursor preference." });
+    }
+    return;
+  }
+  if (req.method === "POST" && pathname === "/api/browser-cursor") {
+    // The tray uses a non-simple header. A website cannot send this request
+    // without a CORS preflight, which this bridge never permits.
+    if (req.socket.remoteAddress !== "127.0.0.1"
+      || req.headers.origin || req.headers["x-openclaw-tray"] !== "1") {
+      sendJson(res, 403, { error: "Only the local tray may change the browser cursor." });
+      return;
+    }
+    try {
+      let body = "", size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > 1024) { sendJson(res, 413, { error: "Request too large." }); return; }
+        body += chunk.toString("utf8");
+      }
+      const value = JSON.parse(body);
+      if (typeof value?.enabled !== "boolean") {
+        sendJson(res, 400, { error: "enabled must be a boolean." });
+        return;
+      }
+      const result = await setBrowserCursorEnabled(value.enabled);
+      sendJson(res, 200, { ok: true, ...result });
+    } catch (error) {
+      sendJson(res, error instanceof SyntaxError ? 400 : 500, {
+        error: error instanceof SyntaxError ? "Invalid JSON." : "Could not update browser cursor.",
+      });
+    }
     return;
   }
   if (req.method === "GET" && pathname === "/api/sessions") {

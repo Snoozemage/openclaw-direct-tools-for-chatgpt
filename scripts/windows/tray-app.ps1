@@ -133,6 +133,7 @@ function Set-TrayState([string]$State, $Components) {
     $script:BridgeItem.Text = 'MCP Bridge: ' + $(if ($Components.Configured -and $Components.Bridge) { 'Healthy' } elseif ($Components.Configured) { 'Not ready' } else { 'Unknown' })
     $script:TunnelItem.Text = 'Secure MCP Tunnel: ' + $(if ($Components.Configured -and $Components.Tunnel) { 'Ready' } elseif ($Components.Configured) { 'Not ready' } else { 'Unknown' })
     $script:RestartItem.Enabled = -not ($null -ne $script:RestartUntil -and (Get-Date) -lt $script:RestartUntil)
+    $script:CursorItem.Enabled = $script:BridgeAvailable
 
     if ($State -ne $script:LastState) {
         Write-TrayLog ('State changed: ' + $State + '; Gateway=' + $Components.Gateway + '; Bridge=' + $Components.Bridge + '; Tunnel=' + $Components.Tunnel)
@@ -263,6 +264,9 @@ $script:BridgeItem.Enabled = $false
 $script:TunnelItem = [Windows.Forms.ToolStripMenuItem]::new('Secure MCP Tunnel: Checking')
 $script:TunnelItem.Enabled = $false
 $script:OpenMonitorItem = [Windows.Forms.ToolStripMenuItem]::new('Open Monitor')
+$script:CursorItem = [Windows.Forms.ToolStripMenuItem]::new('Show AI Cursor')
+$script:CursorItem.Checked = $true
+$script:CursorItem.Enabled = $false
 $script:RestartItem = [Windows.Forms.ToolStripMenuItem]::new('Restart Bridge')
 $script:StopServiceItem = [Windows.Forms.ToolStripMenuItem]::new('Stop OpenClaw Direct Tools')
 $script:ExitItem = [Windows.Forms.ToolStripMenuItem]::new('Exit tray app')
@@ -273,16 +277,46 @@ $script:ExitItem = [Windows.Forms.ToolStripMenuItem]::new('Exit tray app')
 [void]$script:ContextMenu.Items.Add($script:TunnelItem)
 [void]$script:ContextMenu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
 [void]$script:ContextMenu.Items.Add($script:OpenMonitorItem)
+[void]$script:ContextMenu.Items.Add($script:CursorItem)
 [void]$script:ContextMenu.Items.Add($script:RestartItem)
 [void]$script:ContextMenu.Items.Add($script:StopServiceItem)
 [void]$script:ContextMenu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
 [void]$script:ContextMenu.Items.Add($script:ExitItem)
+
+$script:ContextMenu.add_Opening({
+    if (-not $script:BridgeAvailable -or $null -eq $script:Cfg) {
+        $script:CursorItem.Enabled = $false
+        return
+    }
+    $state = Get-Json ('http://127.0.0.1:' + [int]$script:Cfg.bridgePort + '/api/browser-cursor')
+    $script:CursorItem.Enabled = [bool]($state -and $state.ok)
+    if ($script:CursorItem.Enabled) { $script:CursorItem.Checked = [bool]$state.enabled }
+})
 
 $script:NotifyIcon.ContextMenuStrip = $script:ContextMenu
 $script:NotifyIcon.Visible = $true
 
 $script:OpenMonitorItem.add_Click({
     if ($script:MonitorUrl) { Start-Process -FilePath $script:MonitorUrl }
+})
+$script:CursorItem.add_Click({
+    if (-not $script:BridgeAvailable -or $null -eq $script:Cfg) { return }
+    $nextEnabled = -not $script:CursorItem.Checked
+    $script:CursorItem.Enabled = $false
+    try {
+        $url = 'http://127.0.0.1:' + [int]$script:Cfg.bridgePort + '/api/browser-cursor'
+        $payload = @{ enabled = $nextEnabled } | ConvertTo-Json -Compress
+        $response = Invoke-RestMethod -Uri $url -Method Post -Body $payload -ContentType 'application/json' -Headers @{ 'X-OpenClaw-Tray' = '1' } -TimeoutSec 7 -ErrorAction Stop
+        if (-not $response.ok -or [bool]$response.enabled -ne $nextEnabled) {
+            throw 'Bridge did not accept the cursor setting.'
+        }
+        $script:CursorItem.Checked = $nextEnabled
+        Write-TrayLog ('AI cursor visibility changed: ' + $(if ($nextEnabled) { 'shown' } else { 'hidden' }))
+    } catch {
+        Write-TrayLog ('Could not change AI cursor visibility: ' + $_.Exception.Message)
+    } finally {
+        $script:CursorItem.Enabled = $script:BridgeAvailable
+    }
 })
 $script:RestartItem.add_Click({
     if ($null -ne $script:RestartUntil -and (Get-Date) -lt $script:RestartUntil) { return }
