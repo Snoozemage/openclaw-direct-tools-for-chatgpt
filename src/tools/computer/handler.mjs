@@ -3,6 +3,7 @@ import { computerNode } from "../../config/runtime.mjs";
 import { invokeNodeCommand } from "../../openclaw-client.mjs";
 import { computerToolDefinition, MAX_COMPUTER_BATCH_ACTIONS } from "./schema.mjs";
 import { storeScreenshot } from "./screenshot-store.mjs";
+import { screenBorder } from "../../monitor/screen-border.mjs";
 
 const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -60,7 +61,7 @@ function validateAction(action) {
   return "Unsupported desktop action: " + String(action);
 }
 
-export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS } = {}) {
+export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS, indicator } = {}) {
   // OpenClaw's provider permits one active execution per computer. Keep a single
   // correlated execution per node, and serialize operations including whole batches.
   const sessions = new Map();
@@ -97,6 +98,7 @@ export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT
         }
 
         if (sessions.get(session.key) !== session) return;
+        indicator?.close("legacy:" + session.executionId);
         if (result?.isError) {
           session.lastUsedAt = Date.now();
           scheduleIdleCleanup(session);
@@ -117,11 +119,16 @@ export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT
 
   async function closeSession(session, reason, timeoutMs = 15000) {
     clearSessionTimer(session);
-    const result = await session.invoke(session.node, "computer.act", {
-      action: "__close_execution",
-      executionId: session.executionId,
-      reason,
-    }, Math.min(timeoutMs, 15000), { executionId: session.executionId });
+    let result;
+    try {
+      result = await session.invoke(session.node, "computer.act", {
+        action: "__close_execution",
+        executionId: session.executionId,
+        reason,
+      }, Math.min(timeoutMs, 15000), { executionId: session.executionId });
+    } finally {
+      indicator?.close("legacy:" + session.executionId);
+    }
 
     if (!result?.isError) {
       if (sessions.get(session.key) === session) sessions.delete(session.key);
@@ -167,17 +174,26 @@ export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT
     session.lastUsedAt = Date.now();
     scheduleIdleCleanup(session);
 
+    const indicatorKey = "legacy:" + executionId;
+    indicator?.open(indicatorKey);
     let result;
-    if (args.action === "snapshot") {
-      const params = { ...pick(args, ["screenIndex", "maxWidth", "quality", "format"]), executionId };
-      result = await invoke(node, "screen.snapshot", params, timeoutMs, { executionId });
-    } else {
-      const params = { action: args.action, ...pick(args, ACTION_FIELDS[args.action]), executionId };
-      result = await invoke(node, "computer.act", params, timeoutMs, {
-        executionId,
-        refWidth: args.refWidth,
-      });
+    try {
+      if (args.action === "snapshot") {
+        const params = { ...pick(args, ["screenIndex", "maxWidth", "quality", "format"]), executionId };
+        result = await invoke(node, "screen.snapshot", params, timeoutMs, { executionId });
+      } else {
+        const params = { action: args.action, ...pick(args, ACTION_FIELDS[args.action]), executionId };
+        result = await invoke(node, "computer.act", params, timeoutMs, {
+          executionId,
+          refWidth: args.refWidth,
+        });
+      }
+    } catch (error) {
+      indicator?.close(indicatorKey);
+      throw error;
     }
+    if (result?.isError) indicator?.close(indicatorKey);
+    else indicator?.open(indicatorKey);
 
     if (sessions.get(key) === session) {
       session.lastUsedAt = Date.now();
@@ -296,4 +312,4 @@ export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT
   };
 }
 
-export const handleComputerTool = createComputerToolHandler();
+export const handleComputerTool = createComputerToolHandler({ indicator: screenBorder });

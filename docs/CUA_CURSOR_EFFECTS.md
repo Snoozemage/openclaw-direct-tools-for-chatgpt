@@ -27,6 +27,14 @@ Refresh the bridge after registration. The setup helper uses a temporary setup-o
 5. Use fresh references from that CUA runtime; ordinary openclaw_computer frame IDs are from a different execution.
 6. Call end_session in cleanup so the cursor disappears.
 
-The ordinary openclaw_computer wrapper still uses the paired OpenClaw computer node. Its legacy execution does not acquire the new effects merely because standalone Cua Driver is installed. Use the discovered CUA desktop tools when visual feedback is needed. Their calls are classified as computer activity by the bridge monitor and tray.
+The ordinary openclaw_computer wrapper still uses the paired OpenClaw computer node. Cursor effects use the discovered CUA desktop tools. Both paths now share the screen-border indicator, and their calls are classified as computer activity by the bridge monitor and tray.
+
+## Screen border
+
+On Windows, a thin purple edge with a soft ten-pixel glow appears for active desktop sessions and stays visible between actions. The last end_session/close_execution closes it. Failed actions do not leave a new active lease; runtime disposal, configuration replacement, bridge shutdown, and five minutes of inactivity clear the relevant leases.
+
+The renderer uses four small per-pixel-alpha windows per monitor, never activates, passes mouse input through, stays out of the taskbar, and excludes its windows from screen captures. Right and bottom positions use the actual window size after Show: WinForms can enlarge the requested ten-pixel strip to sixteen pixels. Run tests/screen-border-geometry.ps1 on Windows to verify the native outer-edge alignment. Display geometry changes rebuild the strips. The helper exits on stdin EOF, parent-process exit, or six seconds without a heartbeat. Rendering failure is reported through GET /api/computer-indicator without interrupting desktop tools or repeatedly launching processes. The helper starts only when desktop work starts and exits after the last lease closes.
+
+scripts/windows/screen-border.ps1 loads ScreenBorder.cs. The IncludeInCapture switch is for visual verification only; production capture exclusion remains the default.
 
 Cursor visibility indicates visual activity; CUA's own permission checks and OpenClaw's effective tool policy remain authoritative.

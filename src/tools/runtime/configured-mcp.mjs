@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { agentId, invokeTimeoutMs, openclawCli, stateDir } from "../../config/runtime.mjs";
+import { cuaBorderLifecycle } from "../../monitor/screen-border.mjs";
 
 const sessionKey = "agent:" + agentId + ":openclaw-configured-mcp-wrapper";
 let imports;
@@ -46,6 +47,7 @@ async function currentState() {
   const raw = await readFile(process.env.OPENCLAW_CONFIG_PATH, "utf8");
   const fingerprint = createHash("sha256").update(raw).digest("hex");
   if (state?.fingerprint === fingerprint) return state;
+  cuaBorderLifecycle.clear();
   await state?.runtime.dispose();
   state = undefined;
   const cfg = JSON.parse(raw);
@@ -94,7 +96,9 @@ export async function invokeConfiguredMcpTool(id, args = {}) {
     const tool = (await currentState()).tools.get(id);
     if (!tool) return { ok: false, error: { type: "not_available", message: "Configured MCP tool is not available: " + id } };
     const prepared = typeof tool.prepareArguments === "function" ? await tool.prepareArguments(args) : args;
-    const output = await tool.execute(randomUUID(), prepared, AbortSignal.timeout(invokeTimeoutMs));
+    const output = await cuaBorderLifecycle.run(id, prepared, () =>
+      tool.execute(randomUUID(), prepared, AbortSignal.timeout(invokeTimeoutMs))
+    );
     return { ok: true, output };
   });
 }
@@ -103,6 +107,7 @@ export async function disposeConfiguredMcpRuntime() {
   return serialize(async () => {
     const previous = state;
     state = undefined;
+    cuaBorderLifecycle.clear();
     await previous?.runtime.dispose();
   });
 }

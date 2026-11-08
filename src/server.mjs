@@ -11,6 +11,7 @@ import { monitorEvents, eventClients, clearMonitorEvents, getCurrentToolActivity
 import { clearSessionsFromMonitor, listSessions, removeSessionFromMonitor } from "./mcp/session-registry.mjs";
 import { mcpHandler } from "./mcp/sdk-server.mjs";
 import { disposeConfiguredMcpRuntime } from "./tools/runtime/configured-mcp.mjs";
+import { screenBorder } from "./monitor/screen-border.mjs";
 
 const nodeMcpHandler = toNodeHandler(mcpHandler, {
   maxRequestBodySize: 2 * 1024 * 1024,
@@ -76,6 +77,10 @@ const httpServer = createServer(async (req, res) => {
   }
   if (req.method === "GET" && pathname === "/api/events") {
     sendJson(res, 200, { events: monitorEvents.slice(-200) });
+    return;
+  }
+  if (req.method === "GET" && pathname === "/api/computer-indicator") {
+    sendJson(res, 200, screenBorder.getStatus());
     return;
   }
   if (req.method === "GET" && pathname === "/api/activity") {
@@ -201,7 +206,10 @@ function shutdown() {
   }
   eventClients.clear();
   httpServer.close(() => {
-    void Promise.allSettled([mcpHandler.close(), disposeConfiguredMcpRuntime()]).finally(() => process.exit(0));
+    void Promise.allSettled([mcpHandler.close(), disposeConfiguredMcpRuntime()]).finally(() => {
+      screenBorder.dispose();
+      process.exit(0);
+    });
   });
   httpServer.closeAllConnections?.();
 }
