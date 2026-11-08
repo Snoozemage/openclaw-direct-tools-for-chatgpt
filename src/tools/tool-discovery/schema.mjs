@@ -5,7 +5,7 @@ export const toolDiscoveryDefinitions = [
     name: "openclaw_tool_search",
     title: "Search OpenClaw Tools",
     description: "Search tools available in the current OpenClaw agent runtime, including eligible core and plugin tools not directly wrapped by this bridge. Returns compact descriptions and input signatures. Use English keywords for best results because native tool metadata is primarily English. Results are limited to tools with an exact schema and effective availability; directly wrapped tools are omitted to avoid bypassing bridge-specific behavior.",
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     inputSchema: {
       type: "object",
       properties: {
@@ -21,7 +21,7 @@ export const toolDiscoveryDefinitions = [
     name: "openclaw_tool_describe",
     title: "Describe OpenClaw Tool",
     description: "Return the exact input schema and available output schema for a tool id returned by openclaw_tool_search. Uses schemas built by the installed OpenClaw runtime; it does not invent missing schemas. Call this before dispatching a tool when the compact search signature is insufficient.",
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     inputSchema: {
       type: "object",
       properties: {

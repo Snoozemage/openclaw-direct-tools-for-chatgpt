@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-let events=[],sessions=[],selectedEvent=null,selectedSession="all",source=null;
+let events=[],sessions=[],selectedEvent=null,selectedSession="all",source=null,reconnectPending=false;
 let blockValues=Object.create(null),blockModes=Object.create(null),blockDepths=Object.create(null),diffModes=Object.create(null),manualDiffModes=Object.create(null);
 function fmtTime(v){try{return v?new Date(v).toLocaleTimeString():"-"}catch{return "-"}}
 function pretty(v){return typeof v==="string"?v:JSON.stringify(v,null,2)}
@@ -233,9 +233,9 @@ async function load(){
 }
 function connectEvents(){
   if(source)source.close();source=new EventSource("/events");
-  source.onopen=()=>{$("dot").classList.add("live");$("connection").textContent="Live · bridge connected"};
+  source.onopen=()=>{if(reconnectPending){window.location.reload();return}$("dot").classList.add("live");$("connection").textContent="Live · bridge connected"};
   source.onmessage=e=>{try{apply(JSON.parse(e.data))}catch{}};
-  source.onerror=()=>{$("dot").classList.remove("live");$("connection").textContent="Reconnecting…"};
+  source.onerror=()=>{reconnectPending=true;$("dot").classList.remove("live");$("connection").textContent="Reconnecting…"};
 }
 async function copyText(text){
   if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(text);return}
@@ -269,9 +269,7 @@ async function restartBridge(){
         const currentPid=health.pid==null?null:String(health.pid);
         if((previousPid!==null&&currentPid!==null&&currentPid!==previousPid)
           ||(observedOffline&&currentPid!==previousPid)){
-          await load();
-          $("connection").textContent="Bridge restarted · connected";
-          button.disabled=false;
+          window.location.reload();
           return;
         }
         if(currentPid===null)lastHealthError="Health endpoint did not return a PID";

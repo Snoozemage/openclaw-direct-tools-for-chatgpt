@@ -61,7 +61,9 @@ test("MCP instructions follow the OpenChatX builder pattern and adapt to the hos
   assert.match(buildMcpInstructions("linux"), /fully permissioned linux machine/u);
   assert.match(buildMcpInstructions(), /# Tool routing/u);
   assert.match(buildMcpInstructions(), /openclaw_dispatch_action/u);
-  assert.match(buildMcpInstructions(), /openclaw_browser with action=act, kind=batch/u);
+  assert.match(buildMcpInstructions(), /openclaw_browser action=act, kind=batch/u);
+  assert.match(buildMcpInstructions(), /two or more necessary consecutive interactions/u);
+  assert.match(buildMcpInstructions(), /Avoid redundant hover, scrollIntoView, wait, and delayMs/u);
   assert.match(buildMcpInstructions(), /Every type action must include its own ref or selector/u);
   assert.match(buildMcpInstructions(), /not inherited by later actions/u);
   assert.match(buildMcpInstructions(), /openclaw_computer action=batch with up to five actions/u);
@@ -116,6 +118,11 @@ test("SDK exposes all bridge tools and the screenshot viewer resource", async ()
   const names = listed.payload.result.tools.map((tool) => tool.name);
   assert.equal(names.length, toolDefinitions.length);
   assert.deepEqual(new Set(names), new Set(toolDefinitions.map((tool) => tool.name)));
+  assert.ok(names.includes("openclaw_bridge_restart"));
+  for (const publishedTool of listed.payload.result.tools) {
+    const declaredTool = toolDefinitions.find((tool) => tool.name === publishedTool.name);
+    assert.deepEqual(publishedTool.annotations, declaredTool.annotations, publishedTool.name);
+  }
 
   const resources = await rpc("resources/list", {}, null);
   const viewer = resources.payload.result.resources.find((resource) => resource.uri === "ui://openclaw/image-render/v4.html");
@@ -162,6 +169,9 @@ test("start_here returns bridge-specific operating instructions", async () => {
   assert.match(instructions, /If the runtime rejects batching, fall back to individual calls/u);
   assert.match(instructions, /explicit authorization before committing, pushing, force-pushing, merging/u);
   assert.match(instructions, /redaction is best-effort/u);
+  assert.match(instructions, /To restart the bridge, call openclaw_bridge_restart/u);
+  assert.doesNotMatch(instructions, /scripts\/windows\/restart-bridge\.ps1/u);
+  assert.match(instructions, /After the bridge reconnects, call start_here again if the session requires reinitialization/u);
   assert.doesNotMatch(instructions, /Durable Jobs|job_manage|project_manage|subagent_run|\{\{MODE_INSTRUCTIONS\}\}|\bfile_read\b|\bbash\b/u);
 });
 
@@ -219,12 +229,29 @@ test("removing a session from the monitor preserves initialization and restores 
   assert.equal(restored.id, before.id);
 });
 
+test("MCP restart requires session initialization and returns an actionable error without a supervisor", async () => {
+  const sessionKey = "restart-needs-init-session";
+  const blocked = await callTool("openclaw_bridge_restart", {}, sessionKey);
+  assert.equal(blocked.payload.result.isError, true);
+  assert.match(blocked.payload.result.content[0].text, /INITIALIZATION_REQUIRED/u);
+
+  const initialized = await callTool("start_here", {}, sessionKey);
+  assert.equal(initialized.payload.result.isError, undefined);
+  const result = await callTool("openclaw_bridge_restart", {}, sessionKey);
+  assert.equal(result.payload.result.isError, true);
+  assert.equal(result.payload.result.structuredContent.httpStatus, 503);
+  assert.match(result.payload.result.content[0].text, /requires an active bridge supervisor/u);
+});
+
 test("bridge restart delegates process replacement to the external supervisor", async () => {
   const server = await readFile(new URL("../src/server.mjs", import.meta.url), "utf8");
   const supervisor = await readFile(new URL("../scripts/windows/bridge-supervisor.ps1", import.meta.url), "utf8");
 
-  assert.match(server, /process\.env\.OPENCLAW_BRIDGE_SUPERVISED !== "1"/u);
-  assert.match(server, /setTimeout\(shutdown, 300\)/u);
+  assert.match(server, /bridgeRestart\.bindShutdown\(shutdown\)/u);
+  assert.match(server, /bridgeRestart\.request\(\)/u);
+  const controller = await readFile(new URL("../src/bridge-restart.mjs", import.meta.url), "utf8");
+  assert.match(controller, /OPENCLAW_BRIDGE_SUPERVISED === "1"/u);
+  assert.match(controller, /setTimeout\(callback, 1000\)/u);
   assert.doesNotMatch(server, /spawn\("powershell\.exe"/u);
   assert.match(supervisor, /Local\\OpenClawChatGPTBridgeSupervisor/u);
   assert.match(supervisor, /Start-Process -FilePath \$nodePath/u);

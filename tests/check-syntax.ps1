@@ -47,6 +47,7 @@ Write-Host 'Checking source architecture: obsolete tool modules and src/openclaw
 $startScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\windows\start.ps1') -Raw
 $stopScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\windows\stop.ps1') -Raw
 $serverScript = Get-Content -LiteralPath (Join-Path $sourceRoot 'server.mjs') -Raw
+$bridgeRestartSource = Get-Content -LiteralPath (Join-Path $sourceRoot 'bridge-restart.mjs') -Raw
 $bridgeSupervisorScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\windows\bridge-supervisor.ps1') -Raw
 $gatewayTaskScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\windows\gateway-task.ps1') -Raw
 $serviceSupervisorScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\windows\service-supervisor.ps1') -Raw
@@ -65,12 +66,12 @@ $singleStartupValid = $autostartScript.Contains("[Environment]::GetFolderPath('S
 $trayControlValid = $trayScript.Contains('/startupz') -and $trayScript.Contains('/healthz') -and $trayScript.Contains('/readyz') -and $trayScript.Contains('/api/activity') -and $trayScript.Contains('ActivityTimer.Interval = 500') -and $trayScript.Contains("'tool'") -and $trayScript.Contains("'computer'") -and $trayScript.Contains('NotifyIcon') -and $trayScript.Contains('Restart Bridge') -and $trayScript.Contains('Stop OpenClaw Direct Tools') -and $trayScript.Contains('service.stop') -and $trayScript.Contains('tray.disabled') -and $trayScript.Contains('$script:Timer.Interval = 3500') -and $trayScript.Contains('OpenClawDirectToolsNativeMethods') -and $trayScript.Contains('DestroyIconMethod.Invoke') -and -not $trayScript.Contains('Add-Type -TypeDefinition') -and $trayLauncherScript.Contains('shell.Run(command, 0, True)') -and $trayRestartScript.Contains('stop.ps1') -and $trayRestartScript.Contains('start.ps1')
 $gatewayTaskValid = $gatewayTaskScript.Contains('OPENCLAW_STATE_DIR') -and $gatewayTaskScript.Contains('gateway run --port') -and $gatewayTaskScript.Contains('Get-GatewayListener') -and $gatewayTaskScript.Contains('gateway-task.stop') -and $serviceSupervisorScript.Contains('$GatewayScript')
 $bridgeSupervisorValid = $startScript.Contains('bridge-supervisor.ps1') -and $bridgeSupervisorScript.Contains('OPENCLAW_BRIDGE_SUPERVISED') -and $bridgeSupervisorScript.Contains('health.pid') -and $bridgeSupervisorScript.Contains('restarting the bridge only') -and $stopScript.Contains('Stop-BridgeSupervisor')
-$bridgeRestartValid = $serverScript.Contains('OPENCLAW_BRIDGE_SUPERVISED') -and -not $serverScript.Contains('restart-bridge.ps1') -and -not $serverScript.Contains('spawn("powershell.exe"')
+$bridgeRestartValid = $serverScript.Contains('bridgeRestart.request()') -and $serverScript.Contains('bridgeRestart.bindShutdown(shutdown)') -and $bridgeRestartSource.Contains('OPENCLAW_BRIDGE_SUPERVISED === "1"') -and $bridgeRestartSource.Contains('schedule(shutdown)') -and -not $serverScript.Contains('restart-bridge.ps1') -and -not $serverScript.Contains('spawn("powershell.exe"')
 if (-not $gatewayStartValid -or -not $gatewayTaskValid) { throw 'Gateway readiness contract failed: the central supervisor must own gateway-task.ps1 and start.ps1 must wait for Gateway RPC readiness.' }
 if (-not $serviceSupervisorValid -or -not $serviceLifecycleValid) { throw 'Central lifecycle contract failed: one supervisor must own Gateway, bridge, tunnel, tray, and coordinated shutdown.' }
 if (-not $singleStartupValid) { throw 'Startup UX contract failed: install-autostart.ps1 must create one branded Startup-folder shortcut, remove the legacy Registry Run entry, and uninstall both registrations.' }
 if (-not $trayControlValid) { throw 'Tray control contract failed: status, bridge restart, full service stop, and tray-only exit must be available.' }
-if (-not $bridgeSupervisorValid -or -not $bridgeRestartValid) { throw 'Bridge lifecycle contract failed: Monitor restart must exit the supervised bridge and let its external supervisor restart only that child.' }
+if (-not $bridgeSupervisorValid -or -not $bridgeRestartValid) { throw 'Bridge lifecycle contract failed: Monitor and MCP restart must delegate bridge process replacement to the supervisor.' }
 Write-Host 'Checking lifecycle contract: one branded Startup-folder shortcut, central process supervisor, coordinated Gateway/bridge/tunnel/tray shutdown, and tray controls are present.'
 
 $setupScript = Get-Content -LiteralPath (Join-Path $repoRoot 'scripts\windows\setup.ps1') -Raw

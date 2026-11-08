@@ -12,6 +12,7 @@ import { clearSessionsFromMonitor, listSessions, removeSessionFromMonitor } from
 import { mcpHandler } from "./mcp/sdk-server.mjs";
 import { disposeConfiguredMcpRuntime } from "./tools/runtime/configured-mcp.mjs";
 import { screenBorder } from "./monitor/screen-border.mjs";
+import { bridgeRestart } from "./bridge-restart.mjs";
 
 const nodeMcpHandler = toNodeHandler(mcpHandler, {
   maxRequestBodySize: 2 * 1024 * 1024,
@@ -19,7 +20,6 @@ const nodeMcpHandler = toNodeHandler(mcpHandler, {
 });
 const validateMcpHost = localhostHostValidation();
 const validateMcpOrigin = localhostOriginValidation();
-let restartPending = false;
 
 const monitorAssets = new Map([
   ["/monitor/assets/json-formatter.js", {
@@ -116,23 +116,8 @@ const httpServer = createServer(async (req, res) => {
       sendJson(res, 403, { error: "Restart requests must come from the local monitor." });
       return;
     }
-    if (process.env.OPENCLAW_BRIDGE_SUPERVISED !== "1") {
-      sendJson(res, 503, { error: "Bridge restart requires the bridge supervisor. Start it with scripts/windows/start.ps1." });
-      return;
-    }
-    if (restartPending) {
-      sendJson(res, 409, { error: "Bridge restart is already pending." });
-      return;
-    }
-
-    restartPending = true;
-    sendJson(res, 202, {
-      ok: true,
-      status: "scheduled",
-      previousPid: process.pid,
-      message: "The bridge supervisor will restart the bridge. Gateway and Tunnel are not managed by it.",
-    });
-    setTimeout(shutdown, 300);
+    const result = bridgeRestart.request();
+    sendJson(res, result.statusCode, result.body);
     return;
   }
   if (req.method === "POST" && pathname === "/api/events/clear") {
@@ -193,6 +178,8 @@ function sendJson(res, statusCode, body) {
   res.writeHead(statusCode, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(body));
 }
+
+bridgeRestart.bindShutdown(shutdown);
 
 httpServer.listen(port, host, () => {
   console.log("OpenClaw MCP bridge listening at http://" + host + ":" + port + "/mcp");

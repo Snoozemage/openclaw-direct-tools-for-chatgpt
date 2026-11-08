@@ -2,15 +2,33 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { toolDefinitions } from "../src/mcp/tool-definitions.mjs";
 
-test("public MCP tools declare accurate read-only and risk annotations", () => {
-  const readOnlyNames = new Set(["start_here", "openclaw_ls", "openclaw_read", "openclaw_image_render", "openclaw_glob", "openclaw_grep", "openclaw_tool_search", "openclaw_tool_describe"]);
-  const destructiveNames = new Set(["openclaw_edit", "openclaw_write", "openclaw_apply_patch", "openclaw_browser", "openclaw_computer", "openclaw_exec", "openclaw_process", "openclaw_dispatch_action"]);
+const expectedAnnotations = {
+  start_here: [false, false, false],
+  openclaw_bridge_restart: [false, true, false],
+  openclaw_browser: [false, true, true],
+  openclaw_computer: [false, true, true],
+  openclaw_image_render: [true, false, false],
+  openclaw_ls: [true, false, false],
+  openclaw_read: [true, false, false],
+  openclaw_edit: [false, true, false],
+  openclaw_write: [false, true, false],
+  openclaw_apply_patch: [false, true, false],
+  openclaw_glob: [true, false, false],
+  openclaw_grep: [true, false, false],
+  openclaw_exec: [false, true, true],
+  openclaw_process: [false, true, true],
+  openclaw_tool_search: [true, false, true],
+  openclaw_tool_describe: [true, false, true],
+  openclaw_dispatch_action: [false, true, true],
+};
 
-  assert.equal(toolDefinitions.length, readOnlyNames.size + destructiveNames.size);
+test("all public MCP tools declare annotations matching their actual effects and trust boundaries", () => {
+  assert.deepEqual(
+    new Set(toolDefinitions.map((tool) => tool.name)),
+    new Set(Object.keys(expectedAnnotations)),
+  );
   for (const tool of toolDefinitions) {
-    assert.ok(tool.annotations, `${tool.name} must declare MCP tool annotations`);
-    assert.equal(tool.annotations.readOnlyHint, readOnlyNames.has(tool.name), `${tool.name} readOnlyHint`);
-    assert.equal(tool.annotations.destructiveHint, destructiveNames.has(tool.name), `${tool.name} destructiveHint`);
-    assert.equal(tool.annotations.openWorldHint, ["openclaw_browser", "openclaw_computer", "openclaw_exec", "openclaw_process", "openclaw_dispatch_action"].includes(tool.name), `${tool.name} openWorldHint`);
+    const [readOnlyHint, destructiveHint, openWorldHint] = expectedAnnotations[tool.name];
+    assert.deepEqual(tool.annotations, { readOnlyHint, destructiveHint, openWorldHint }, tool.name);
   }
 });
