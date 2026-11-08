@@ -14,7 +14,7 @@
 
 **Platform status:** Windows is the currently tested setup. Linux and macOS support has not yet been validated. Contributions and testing reports for additional platforms are welcome. See [Contributing](CONTRIBUTING.md).
 
-Use ChatGPT to work with your local environment: search files, understand and edit code, run commands and tests, automate Chrome, and interact with your Windows desktop. The bridge exposes these capabilities as MCP tools and can also discover other eligible tools in your current OpenClaw runtime.
+Work with local files and code, run tests, automate Chrome, and control your Windows desktop - all from ChatGPT. You can even restart the bridge from your conversation when needed. The bridge can also discover other eligible tools in your OpenClaw runtime.
 
 Rather than routing every operation through the OpenClaw Main Agent, ChatGPT can call the bridge's tools directly. Native actions are forwarded through supported OpenClaw interfaces, so OpenClaw permissions, approvals, and policies remain authoritative.
 
@@ -26,14 +26,15 @@ Rather than routing every operation through the OpenClaw Main Agent, ChatGPT can
 
 | Capability | Public tools | What ChatGPT can do |
 |---|---|---|
-| Conversation setup | `start_here` | Load tool-routing and safety instructions once at the start of a ChatGPT conversation. |
-| Browser automation | `openclaw_browser` | Work with Chrome tabs/pages, snapshots, downloads/uploads and diagnostics; show browser-local AI cursor/click feedback; highlight targets, record traces, inspect response bodies, and manage page storage and environment overrides. |
-| Desktop automation | `openclaw_computer` | Inspect the Windows screen, use the mouse and keyboard, operate windows/apps, and run bounded action batches. |
-| File operations | `openclaw_ls`, `openclaw_read`, `openclaw_edit`, `openclaw_write`, `openclaw_apply_patch` | List, read, edit, create/replace, and patch local files through OpenClaw's native file tools. Listing and reading support batches. |
-| Local project search | `openclaw_glob`, `openclaw_grep` | Find project paths and search file contents without using a shell for the search itself. |
-| Runtime operations | `openclaw_exec`, `openclaw_process` | Run commands and inspect or control processes started through the runtime wrapper. |
-| Screenshot presentation | `openclaw_image_render` | Display a recent desktop screenshot directly in the ChatGPT conversation using a short-lived reference. |
-| Dynamic tool discovery | `openclaw_tool_search`, `openclaw_tool_describe`, `openclaw_dispatch_action` | Find other eligible tools in the current OpenClaw runtime, inspect their actual schemas, and invoke them when no dedicated bridge wrapper exists. |
+| Conversation setup | `start_here` | Set up a conversation and reload bridge instructions after reconnecting when needed. |
+| Bridge recovery | `openclaw_bridge_restart` | Restart the local bridge from ChatGPT without restarting your Gateway or Tunnel. |
+| Browser automation | `openclaw_browser` | Explore websites, fill forms, handle uploads and downloads, and see where ChatGPT clicks. |
+| Desktop automation | `openclaw_computer` | Work with Windows apps using the screen, mouse, and keyboard. |
+| File operations | `openclaw_ls`, `openclaw_read`, `openclaw_edit`, `openclaw_write`, `openclaw_apply_patch` | Explore, read, create, and update local files. |
+| Local project search | `openclaw_glob`, `openclaw_grep` | Find files and locate text across your projects. |
+| Runtime operations | `openclaw_exec`, `openclaw_process` | Run commands and tests, and follow longer-running tasks. |
+| Screenshot presentation | `openclaw_image_render` | View screenshots of your desktop directly in ChatGPT. |
+| Additional OpenClaw tools | `openclaw_tool_search`, `openclaw_tool_describe`, `openclaw_dispatch_action` | Discover and use other available tools in your OpenClaw setup. |
 
 See [Browser capabilities](docs/BROWSER_CAPABILITIES.md) for browser actions and feedback controls, and [Desktop visual feedback](docs/CUA_CURSOR_EFFECTS.md) for Windows cursor and screen-border setup.
 
@@ -160,9 +161,9 @@ The autostart installer creates one Startup-folder shortcut named **OpenClaw Dir
 1. In ChatGPT on the web, open **Plugins**, select **+**, then choose **Add custom MCP server**.
 2. Enter a name and optional description. Under **Connection**, choose **Tunnel**, then select the same Secure MCP Tunnel created earlier (or enter its `tunnel_id` if prompted). Do not paste the local `http://127.0.0.1:19002/mcp` address into **Server URL** when using the tunnel connection.
 3. Configure authentication if the connection form requires it, review the risk warning, acknowledge it, and choose **Create as a plugin**.
-4. Review the discovered tool list and metadata. Install the resulting plugin, start a new conversation, type `@`, select the plugin, and test a low-risk operation.
+4. Review the available tools. Install the plugin, start a new conversation, type `@`, select the plugin, and test a low-risk operation.
 
-Adding the plugin is separate from running the local bridge and tunnel client. If the tunnel is not listed, verify that it is associated with the target ChatGPT workspace and that your Platform account has Tunnels Read + Use. The project maintainer has successfully connected this bridge using ChatGPT Free. See the [ChatGPT custom MCP server guide](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt) for details.
+Adding the plugin is separate from running the local bridge and tunnel client. After a bridge update adds new tools, refresh the plugin in ChatGPT to see them. If the tunnel is not listed, verify that it is associated with the target ChatGPT workspace and that your Platform account has Tunnels Read + Use. The project maintainer has successfully connected this bridge using ChatGPT Free. See the [ChatGPT custom MCP server guide](https://help.openai.com/en/articles/12584461-connecting-custom-mcp-servers-in-chatgpt) for details.
 
 ## Tool behavior and boundaries
 
@@ -231,7 +232,7 @@ The bridge refreshes effective tool availability before dispatch. OpenClaw remai
 
 <p><img src="https://raw.githubusercontent.com/Snoozemage/openclaw-direct-tools-for-chatgpt/main/docs/images/monitor-overview.png" alt="Local call monitor overview showing active sessions, tool-call history, and invocation details" width="100%"></p>
 
-The monitor is intended for local development and troubleshooting. It shows running, completed, and failed calls; arguments and output; duration; and diagnostics when available. It supports status filtering, copying a session or individual call as JSON, clearing in-memory history, and removing retained sessions. It retains at most the 200 newest events in memory.
+The monitor helps you follow what ChatGPT is doing and investigate failed calls. It shows running, completed, and failed operations, their duration, and details when available. You can filter calls, copy results, and clear the in-memory history (up to 200 recent events). It reconnects and refreshes automatically after the bridge restarts.
 
 Open it at `http://127.0.0.1:19002/monitor` (the port may differ if reconfigured). The server also provides `/healthz`, `/api/events`, `/api/sessions`, `/api/events/export`, and the `/events` SSE stream. Keep the monitor and bridge local; do not expose them to untrusted networks. Call arguments and results can contain private data, and redaction is best-effort.
 
