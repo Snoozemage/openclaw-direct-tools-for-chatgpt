@@ -21,6 +21,50 @@ export function prepareBrowserArgs(args = {}) {
   return nativeArgs;
 }
 
+export function isPlainFragmentLink(pageUrl, linkUrl, rawHref, linkTarget, linkDownload, inlineHandler) {
+  if (typeof rawHref !== "string" || !rawHref.startsWith("#")
+    || rawHref.length < 2 || rawHref.startsWith("#!")
+    || linkTarget || linkDownload || inlineHandler) return false;
+  try {
+    const source = new URL(pageUrl), target = new URL(linkUrl);
+    return (source.protocol === "http:" || source.protocol === "https:")
+      && source.origin === target.origin
+      && source.pathname === target.pathname
+      && source.search === target.search
+      && source.hash !== target.hash
+      && Boolean(target.hash);
+  } catch { return false; }
+}
+
+export function isPostNavigationVisibilityError(error, ref) {
+  if (typeof ref !== "string" || !ref) return false;
+  const messages = [
+    error?.message,
+    error?.gatewayError?.message,
+    ...(error?.gatewayLogContext?.lines ?? []).map(line => line?.message),
+  ];
+  return messages.some(message => typeof message === "string"
+    && message.includes('Element "' + ref + '" is not interactable (not visible)'));
+}
+
+export function isConfirmedLinkNavigation(beforeUrl, linkUrl, observedUrl) {
+  try {
+    const before = new URL(beforeUrl), link = new URL(linkUrl), observed = new URL(observedUrl);
+    if (!["http:", "https:"].includes(link.protocol) || before.href === observed.href
+      || link.origin !== observed.origin || link.pathname !== observed.pathname) return false;
+
+    for (const key of ["v", "id", "videoId"]) {
+      if (link.searchParams.has(key) && link.searchParams.get(key) !== observed.searchParams.get(key)) return false;
+    }
+    const params = [...link.searchParams.entries()];
+    const shared = params.filter(([key]) => observed.searchParams.has(key));
+    return params.length === 0 || (shared.length > 0
+      && shared.every(([key, value]) => observed.searchParams.getAll(key).includes(value)));
+  } catch {
+    return false;
+  }
+}
+
 export function isBrowserTimeout(errorDetails) {
   const text = typeof errorDetails === "string" ? errorDetails : JSON.stringify(errorDetails ?? {});
   return /timed out|timeout\b(?: after| of| while| waiting| reached)?|deadline exceeded/i.test(text);

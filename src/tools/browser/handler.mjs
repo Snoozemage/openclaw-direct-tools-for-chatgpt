@@ -1,12 +1,15 @@
-import { invokeGatewayTool, getRecentGatewayToolErrorLog } from "../../openclaw-client.mjs";
+import { invokeGatewayTool, getRecentGatewayToolErrorLog, shouldCollectGatewayErrorLogs } from "../../openclaw-client.mjs";
 import { normalizeToolOutput } from "../../mcp/format.mjs";
 import { browserToolDefinition } from "./schema.mjs";
 import { ensurePersonalChromeRunning } from "./chrome-launch.mjs";
 import { ADVANCED_BROWSER_ACTIONS } from "./advanced-routes.mjs";
 import { invokeAdvancedBrowser } from "./advanced.mjs";
-import { browserFeedbackFunction, feedbackOptions, shouldShowBrowserFeedback } from "./effects.mjs";
+import { browserAutoFragmentFeedbackFunction, browserFeedbackFunction, browserFragmentClickFunction, browserLinkContextFunction, feedbackOptions, shouldShowBrowserFeedback } from "./effects.mjs";
 import {
   isBrowserTimeout,
+  isPlainFragmentLink,
+  isConfirmedLinkNavigation,
+  isPostNavigationVisibilityError,
   outputContainsTargetUrl,
   OPEN_RECOVERY_PROBE_TIMEOUT_MS,
   prepareBrowserArgs,
@@ -26,6 +29,59 @@ function readFeedbackDetails(output) {
 
 function pickFeedbackRoute(args) {
   return Object.fromEntries(["targetId", "target", "node", "dashboard"].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
+}
+
+let activeFeedbackTab = null;
+let activeFeedbackSyncedAt = 0;
+let activeFeedbackDocumentUrl = null;
+const READ_FEEDBACK_REUSE_MS = 20_000;
+
+function documentUrl(url) {
+  if (typeof url !== "string") return null;
+  try { const result = new URL(url); result.hash = ""; return result.href; }
+  catch { return null; }
+}
+function canReuseReadFeedback(targetId, url) {
+  return Boolean(targetId && activeFeedbackTab === targetId
+    && Date.now() - activeFeedbackSyncedAt < READ_FEEDBACK_REUSE_MS
+    && (!url || !activeFeedbackDocumentUrl
+      || documentUrl(url) === activeFeedbackDocumentUrl));
+}
+async function claimFeedbackTab(targetId, url = null) {
+  if (!targetId) return;
+  const previous = activeFeedbackTab;
+  activeFeedbackTab = targetId;
+  activeFeedbackSyncedAt = Date.now();
+  activeFeedbackDocumentUrl = documentUrl(url);
+  if (!previous || previous === targetId) return;
+  try {
+    await invokeGatewayTool("browser", {
+      action:"act",kind:"evaluate",profile:"chrome",targetId:previous,
+      fn:browserFeedbackFunction({deactivate:true}),timeoutMs:3000,
+    });
+  } catch {  }
+}
+
+function isPlainFragmentContext(context) {
+  return Boolean(context && isPlainFragmentLink(
+    context.pageUrl, context.linkUrl, context.linkRawHref,
+    context.linkTarget, context.linkDownload, context.linkHandler,
+  ));
+}
+
+function nativeBatchStepFailed(response) {
+  if (response?.isError) return true;
+  for (const item of response?.content ?? []) {
+    if (item.type !== "text") continue;
+    const start = item.text.indexOf("\\n---\\n");
+    const end = item.text.lastIndexOf("\\n<<<END_EXTERNAL_UNTRUSTED_CONTENT");
+    const json = start >= 0 && end > start ? item.text.slice(start + 5, end) : item.text;
+    try {
+      const value = JSON.parse(json);
+      if (value?.results?.some?.(step => step.ok === false)) return true;
+    } catch {  }
+  }
+  return false;
 }
 
 function readNativeErrors(output) {
@@ -92,6 +148,52 @@ export async function handleBrowserTool(name, args = {}) {
   if (name !== browserToolDefinition.name) return undefined;
 
   let nativeArgs = prepareBrowserArgs(args);
+  if (args.action === "act" && args.kind === "batch"
+    && Array.isArray(args.actions) && args.actions.length > 1) {
+    const steps = args.actions;
+    const final = steps.at(-1);
+    if (final?.kind === "click" && !final.doubleClick
+      && (!final.button || final.button === "left")
+      && !final.modifiers?.length && (final.ref || final.selector)
+      && steps.slice(0,-1).every(step => ["hover","scrollIntoView","wait"].includes(step.kind))) {
+      let context;
+      try {
+        const preflight = await invokeGatewayTool("browser", {
+          action:"act",kind:"evaluate",profile:"chrome",
+          ...pickFeedbackRoute(nativeArgs),
+          ...(final.ref ? {ref:final.ref} : {}),
+          fn:browserLinkContextFunction(final.selector),timeoutMs:3500,
+        });
+        context = preflight.ok && !readNativeErrors(preflight.output).length
+          ? readFeedbackDetails(preflight.output).result : null;
+      } catch {  }
+      if (isPlainFragmentContext(context)) {
+        const prefix = await handleBrowserTool(name,{
+          ...args,actions:steps.slice(0,-1),
+        });
+        if (nativeBatchStepFailed(prefix)) return prefix;
+        const clicked = await handleBrowserTool(name,{
+          ...args,kind:"click",actions:undefined,...final,
+        });
+        if (clicked?.isError) return clicked;
+        const prefixOutput = readFeedbackDetails(prefix);
+        const clickOutput = readFeedbackDetails(clicked);
+        const results = [...(prefixOutput.results ?? []),{
+          ok:clickOutput.ok === true,
+          outcome:clickOutput.outcome,
+          ...(clickOutput.url ? {url:clickOutput.url} : {}),
+        }];
+        return {
+          ...clicked,
+          content:[{type:"text",text:JSON.stringify({
+            ok:results.every(step=>step.ok),results,
+            ...(clickOutput.url ? {url:clickOutput.url} : {}),
+          },null,2)}],
+          diagnostics:{...clicked.diagnostics,batchPrefixActions:steps.length-1},
+        };
+      }
+    }
+  }
   if (ADVANCED_BROWSER_ACTIONS.includes(args.action)) {
     const result = await invokeAdvancedBrowser(nativeArgs);
     return { ...normalizeToolOutput(result), diagnostics: result.diagnostics ?? result.error };
@@ -102,6 +204,15 @@ export async function handleBrowserTool(name, args = {}) {
       fn: browserFeedbackFunction({ enabled: args.enabled !== false, force: true }),
     });
     const errors = result.ok ? readNativeErrors(result.output) : [];
+    if (result.ok && !errors.length) {
+      const details = readFeedbackDetails(result.output);
+      const tab = args.tabId ?? nativeArgs.targetId ?? details.tabId ?? details.targetId;
+      if (args.enabled === false) {
+        if (tab === activeFeedbackTab) {
+          activeFeedbackTab = null; activeFeedbackSyncedAt = 0; activeFeedbackDocumentUrl = null;
+        }
+      } else if (details.result?.enabled) await claimFeedbackTab(tab, details.url);
+    }
     return { ...normalizeToolOutput(result), ...(errors.length ? { isError: true } : {}), diagnostics: { stage: "browser_visual_feedback", ...result.diagnostics } };
   }
   let chromeLaunch = { launched: false };
@@ -124,30 +235,66 @@ export async function handleBrowserTool(name, args = {}) {
   }
 
   let feedback;
+  let clickContext;
+  let autoFragmentProbe;
+  const eligibleClick = args.action === "act" && args.kind === "click"
+    && !args.doubleClick && (!args.button || args.button === "left")
+    && !args.modifiers?.length;
   if (shouldShowBrowserFeedback(args)) {
     const { ref, options } = feedbackOptions(args);
     try {
       const probe = await invokeGatewayTool("browser", {
         action: "act", kind: "evaluate", profile: "chrome",
         ...pickFeedbackRoute(nativeArgs), ...(ref ? { ref } : {}),
-        fn: browserFeedbackFunction(options), timeoutMs: 5000,
+        fn: eligibleClick
+          ? browserAutoFragmentFeedbackFunction(options,options.selector)
+          : browserFeedbackFunction(options), timeoutMs: 5000,
       });
       const errors = probe.ok ? readNativeErrors(probe.output) : [];
       const details = readFeedbackDetails(probe.output);
+      if (args.kind === "click" && probe.ok && !errors.length) {
+        clickContext = details.result;
+        if (eligibleClick && details.result?.scheduled === true) autoFragmentProbe=probe;
+      }
       const enabled = details.result?.enabled !== false;
       feedback = { available: probe.ok && !errors.length && enabled, ...(probe.ok && !errors.length && enabled ? {} : { reason: !enabled ? "Browser effects disabled for this document" : probe.error?.message ?? errors[0]?.error ?? errors[0]?.message ?? "Browser feedback unavailable" }) };
       if (probe.ok && !errors.length && details.targetId && !nativeArgs.targetId) nativeArgs = { ...nativeArgs, targetId: details.targetId };
+      if (feedback.available) await claimFeedbackTab(args.tabId ?? nativeArgs.targetId ?? details.tabId ?? details.targetId, details.url);
     } catch (error) { feedback = { available: false, reason: error.message }; }
   }
+  if (args.action === "act" && args.kind === "click" && !clickContext
+    && !shouldShowBrowserFeedback(args)) {
+    try {
+      const probe = await invokeGatewayTool("browser", {
+        action: "act", kind: "evaluate", profile: "chrome",
+        ...pickFeedbackRoute(nativeArgs), ...(nativeArgs.ref ? {ref:nativeArgs.ref} : {}),
+        fn: browserLinkContextFunction(nativeArgs.selector), timeoutMs: 5000,
+      });
+      if (probe.ok && !readNativeErrors(probe.output).length) {
+        const details = readFeedbackDetails(probe.output);
+        clickContext = details.result;
+        if (details.targetId && !nativeArgs.targetId) nativeArgs = {...nativeArgs,targetId:details.targetId};
+      }
+    } catch {  }
+  }
+
+  const fragmentClick = eligibleClick && nativeArgs.targetId
+    && (autoFragmentProbe || isPlainFragmentContext(clickContext));
   const startedAt = Date.now();
-  const result = await invokeGatewayTool("browser", nativeArgs);
-  if (feedback?.available) {
+  const result = autoFragmentProbe ?? await invokeGatewayTool("browser",fragmentClick
+    ? {action:"act",kind:"evaluate",profile:"chrome",targetId:nativeArgs.targetId,
+      ...(nativeArgs.ref ? {ref:nativeArgs.ref} : {}),
+      fn:browserFragmentClickFunction(nativeArgs.selector,
+        clickContext.linkUrl,clickContext.linkRawHref,clickContext.pageUrl),
+      timeoutMs:args.timeoutMs ?? 4500}
+    : nativeArgs);
+  if (feedback?.available && !autoFragmentProbe) {
     // Finish only on the same observed tab. Do not guess another active tab.
     if (nativeArgs.targetId) {
       try {
         await invokeGatewayTool("browser", {
           action: "act", kind: "evaluate", profile: "chrome",
-          ...pickFeedbackRoute(nativeArgs), fn: browserFeedbackFunction({ finish: true }), timeoutMs: 3000,
+          ...pickFeedbackRoute(nativeArgs), fn: browserFeedbackFunction({ finish: true, activate: true }), timeoutMs: 3000,
         });
       } catch { /* feedback cleanup must never replace the action result */ }
     }
@@ -155,6 +302,84 @@ export async function handleBrowserTool(name, args = {}) {
   } else if (feedback) result.diagnostics = { ...result.diagnostics, visualFeedback: feedback };
   const nativeErrors = result?.ok ? readNativeErrors(result.output) : [];
   const failed = !result?.ok || nativeErrors.length > 0;
+  if (fragmentClick) {
+    const details = !failed ? readFeedbackDetails(result.output) : null;
+    let confirmed = details?.result?.scheduled === true
+      && details?.url === clickContext.linkUrl;
+    if (!confirmed && (failed || details?.result?.scheduled === true)) {
+      try {
+        const tabsResult = await invokeGatewayTool("browser", {
+          action:"tabs",profile:"chrome",timeoutMs:OPEN_RECOVERY_PROBE_TIMEOUT_MS,
+        });
+        const tabs = tabsResult.ok ? readFeedbackDetails(tabsResult.output).tabs ?? [] : [];
+        confirmed = tabs.some(tab => (tab.targetId === nativeArgs.targetId
+          || tab.tabId === nativeArgs.targetId) && tab.url === clickContext.linkUrl);
+      } catch {  }
+    }
+    if (confirmed) return {
+      content:[{type:"text",text:JSON.stringify({
+        ok:true,action:"click",outcome:"fragment_navigation_confirmed",
+        url:clickContext.linkUrl,tabId:args.tabId ?? nativeArgs.targetId,
+      },null,2)}],
+      diagnostics:{stage:"fragment_navigation",verification:"same_tab_fragment",
+        visualFeedback:feedback ?? null,elapsedMs:Date.now()-startedAt},
+    };
+    return {
+      isError:true,
+      content:[{type:"text",text:JSON.stringify({
+        type:"fragment_navigation_unconfirmed",
+        message:"The in-page click was not confirmed; it was not retried.",
+        targetUrl:clickContext.linkUrl,
+      },null,2)}],
+      diagnostics:{stage:"fragment_navigation_unconfirmed",
+        visualFeedback:feedback ?? null,elapsedMs:Date.now()-startedAt},
+    };
+  }
+  if (!failed && ["open","focus","navigate","snapshot","text","screenshot"].includes(args.action)
+    && args.visualFeedback !== false) {
+    const details = readFeedbackDetails(result.output);
+    const tab = details.tabId ?? nativeArgs.targetId ?? details.targetId;
+    const readOnlyAction = ["snapshot","text","screenshot"].includes(args.action);
+    if (tab && !(readOnlyAction && canReuseReadFeedback(tab,details.url))) {
+      try {
+        const probe = await invokeGatewayTool("browser", {
+          action:"act",kind:"evaluate",profile:"chrome",targetId:tab,
+          fn:browserFeedbackFunction({kind:"ready"}),timeoutMs:5000,
+        });
+        if (probe.ok && !readNativeErrors(probe.output).length
+          && readFeedbackDetails(probe.output).result?.enabled) {
+          await claimFeedbackTab(tab,readFeedbackDetails(probe.output).url ?? details.url);
+        }
+      } catch {  }
+    }
+  }
+  if (!failed && (args.action === "stop" || (args.action === "close"
+    && (args.tabId ?? nativeArgs.targetId) === activeFeedbackTab))) {
+    activeFeedbackTab = null; activeFeedbackSyncedAt = 0; activeFeedbackDocumentUrl = null;
+  }
+  if (failed && args.action === "act" && args.kind === "click"
+    && clickContext?.pageUrl && clickContext?.linkUrl && nativeArgs.targetId
+    && (!result?.ok || isPostNavigationVisibilityError(result.error ?? nativeErrors[0], nativeArgs.ref ?? nativeArgs.selector))) {
+    try {
+      const tabsResult = await invokeGatewayTool("browser", {
+        action:"tabs",profile:"chrome",timeoutMs:OPEN_RECOVERY_PROBE_TIMEOUT_MS,
+      });
+      if (tabsResult.ok) {
+        const tabs = readFeedbackDetails(tabsResult.output).tabs ?? [];
+        const current = tabs.find(tab => tab.tabId === nativeArgs.targetId || tab.targetId === nativeArgs.targetId);
+        if (current && isConfirmedLinkNavigation(clickContext.pageUrl, clickContext.linkUrl, current.url)) {
+          return {
+            content:[{type:"text",text:JSON.stringify({
+              ok:true,action:"click",outcome:"navigation_confirmed",
+              url:current.url,tabId:current.tabId,
+              message:"Destination verified after native click reported the original element hidden. No click was retried.",
+            },null,2)}],
+            diagnostics:{stage:"click_navigation_reconciled",verification:"same_tab_destination",visualFeedback:feedback ?? null},
+          };
+        }
+      }
+    } catch {  }
+  }
   if (args.action === "open" && failed && isBrowserTimeout(result)) {
     const recovered = await reconcileTimedOutOpen(args, nativeArgs, result);
     if (recovered) return recovered;
@@ -190,7 +415,7 @@ export async function handleBrowserTool(name, args = {}) {
     kind: args.kind ?? null,
     elapsedMs: result.diagnostics?.elapsedMs ?? null,
     nativeErrors,
-    gatewayLogContext: await getRecentGatewayToolErrorLog(startedAt),
+    ...(shouldCollectGatewayErrorLogs() ? { gatewayLogContext: await getRecentGatewayToolErrorLog(startedAt) } : {}),
   };
 
   return {
