@@ -35,6 +35,11 @@ let activeFeedbackTab = null;
 let activeFeedbackSyncedAt = 0;
 let activeFeedbackDocumentUrl = null;
 const READ_FEEDBACK_REUSE_MS = 20_000;
+const DEFAULT_LINK_CLICK_TIMEOUT_MS = 10_000;
+const LINK_CLICK_TRANSPORT_TIMEOUT_MS = 15_000;
+const LINK_CLICK_OBSERVE_DELAY_MS = 250;
+const LINK_CLICK_OBSERVE_INTERVAL_MS = 350;
+const LINK_CLICK_OBSERVE_WINDOW_MS = 14_000;
 
 function documentUrl(url) {
   if (typeof url !== "string") return null;
@@ -60,6 +65,28 @@ async function claimFeedbackTab(targetId, url = null) {
       fn:browserFeedbackFunction({deactivate:true}),timeoutMs:3000,
     });
   } catch {  }
+}
+
+async function watchLinkNavigation(context, targetId, isStopped) {
+  const deadline = Date.now() + LINK_CLICK_OBSERVE_WINDOW_MS;
+  await new Promise(resolve => setTimeout(resolve, LINK_CLICK_OBSERVE_DELAY_MS));
+  while (!isStopped() && Date.now() < deadline) {
+    try {
+      const tabsResult = await invokeGatewayTool("browser", {
+        action: "tabs", profile: "chrome", timeoutMs: 2_000,
+      }, undefined, 3_000);
+      if (isStopped()) return { kind: "watch_complete" };
+      if (tabsResult.ok) {
+        const tabs = readFeedbackDetails(tabsResult.output).tabs ?? [];
+        const current = tabs.find(tab => tab.tabId === targetId || tab.targetId === targetId);
+        if (current && isConfirmedLinkNavigation(context.pageUrl, context.linkUrl, current.url)) {
+          return { kind: "navigation", url: current.url, tabId: current.tabId ?? targetId };
+        }
+      }
+    } catch {}
+    if (!isStopped()) await new Promise(resolve => setTimeout(resolve, LINK_CLICK_OBSERVE_INTERVAL_MS));
+  }
+  return { kind: "watch_complete" };
 }
 
 function isPlainFragmentContext(context) {
@@ -280,14 +307,44 @@ export async function handleBrowserTool(name, args = {}) {
 
   const fragmentClick = eligibleClick && nativeArgs.targetId
     && (autoFragmentProbe || isPlainFragmentContext(clickContext));
+  const watchableLinkClick = eligibleClick && !fragmentClick && nativeArgs.targetId
+    && clickContext?.pageUrl && clickContext?.linkUrl
+    && clickContext.pageUrl !== clickContext.linkUrl
+    && (!clickContext.linkTarget || clickContext.linkTarget === "_self")
+    && !clickContext.linkDownload;
+  const boundedLinkClick = watchableLinkClick && args.timeoutMs === undefined;
+  if (boundedLinkClick) nativeArgs = { ...nativeArgs, timeoutMs: DEFAULT_LINK_CLICK_TIMEOUT_MS };
   const startedAt = Date.now();
-  const result = autoFragmentProbe ?? await invokeGatewayTool("browser",fragmentClick
+  const nativeRequest = Promise.resolve(autoFragmentProbe ?? invokeGatewayTool("browser", fragmentClick
     ? {action:"act",kind:"evaluate",profile:"chrome",targetId:nativeArgs.targetId,
       ...(nativeArgs.ref ? {ref:nativeArgs.ref} : {}),
       fn:browserFragmentClickFunction(nativeArgs.selector,
         clickContext.linkUrl,clickContext.linkRawHref,clickContext.pageUrl),
       timeoutMs:args.timeoutMs ?? 4500}
-    : nativeArgs);
+    : nativeArgs, undefined, boundedLinkClick ? LINK_CLICK_TRANSPORT_TIMEOUT_MS : undefined))
+    .then(result => ({ kind: "native", result }));
+  let observationStopped = false;
+  const first = watchableLinkClick
+    ? await Promise.race([nativeRequest, watchLinkNavigation(clickContext, nativeArgs.targetId,
+      () => observationStopped)])
+    : await nativeRequest;
+  observationStopped = true;
+  if (first.kind === "navigation") {
+    if (activeFeedbackTab === nativeArgs.targetId) {
+      activeFeedbackTab = null; activeFeedbackSyncedAt = 0; activeFeedbackDocumentUrl = null;
+    }
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        ok: true, action: "click", outcome: "navigation_confirmed",
+        url: first.url, tabId: first.tabId,
+        message: "Destination observed while the native click was still pending. No click was retried.",
+      }, null, 2) }],
+      diagnostics: { stage: "click_navigation_observed",
+        verification: "same_tab_destination", visualFeedback: feedback ?? null,
+        elapsedMs: Date.now() - startedAt },
+    };
+  }
+  const result = first.kind === "native" ? first.result : (await nativeRequest).result;
   if (feedback?.available && !autoFragmentProbe) {
     // Finish only on the same observed tab. Do not guess another active tab.
     if (nativeArgs.targetId) {
@@ -359,7 +416,8 @@ export async function handleBrowserTool(name, args = {}) {
   }
   if (failed && args.action === "act" && args.kind === "click"
     && clickContext?.pageUrl && clickContext?.linkUrl && nativeArgs.targetId
-    && (!result?.ok || isPostNavigationVisibilityError(result.error ?? nativeErrors[0], nativeArgs.ref ?? nativeArgs.selector))) {
+    && (!result?.ok || isPostNavigationVisibilityError(result.error ?? nativeErrors[0], nativeArgs.ref ?? nativeArgs.selector)
+      || isBrowserTimeout(nativeErrors[0]))) {
     try {
       const tabsResult = await invokeGatewayTool("browser", {
         action:"tabs",profile:"chrome",timeoutMs:OPEN_RECOVERY_PROBE_TIMEOUT_MS,

@@ -144,6 +144,144 @@ for (const navigated of [true, false]) {
   });
 }
 
+
+for (const explicitTimeout of [undefined, 30_000]) {
+  test(`link click uses a bounded default without overriding explicit timeout (${explicitTimeout ?? "default"})`, async () => {
+    const previousFetch = globalThis.fetch;
+    const previousTimeout = AbortSignal.timeout;
+    const before = "https://www.youtube.com/results?search_query=seasons";
+    const destination = "https://www.youtube.com/watch?v=M7R7-qnTsFw&list=RDM7R7-qnTsFw&start_radio=1";
+    const requests = [];
+    const deadlines = [];
+    try {
+      AbortSignal.timeout = (milliseconds) => {
+        deadlines.push(milliseconds);
+        return previousTimeout(milliseconds);
+      };
+      globalThis.fetch = async (_url, options) => {
+        const { args } = JSON.parse(options.body);
+        requests.push(args);
+        let output;
+        if (args.kind === "evaluate") {
+          output = { details: { targetId: "t-music", result: {
+            pageUrl: before, linkUrl: destination, linkTarget: null, linkDownload: false,
+          } } };
+        } else if (args.kind === "click") {
+          output = { content: [{ type: "text", text: JSON.stringify({
+            type: "tool_error", message: "Native click timed out after navigation",
+          }) }] };
+        } else if (args.action === "tabs") {
+          output = { details: { targetId: "t-music", tabs: [{ tabId: "t-music", url: destination }] } };
+        } else {
+          assert.fail("Unexpected browser action: " + JSON.stringify(args));
+        }
+        return new Response(JSON.stringify({ ok: true, result: output }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      };
+      const result = await handleBrowserTool("openclaw_browser", {
+        action: "act", kind: "click", tabId: "t-music", ref: "e471",
+        visualFeedback: false, ...(explicitTimeout === undefined ? {} : { timeoutMs: explicitTimeout }),
+      });
+      assert.equal(result.isError, undefined);
+      assert.equal(result.diagnostics.stage, "click_navigation_reconciled");
+      assert.equal(JSON.parse(result.content[0].text).url, destination);
+      assert.equal(requests.filter(request => request.kind === "click").length, 1);
+      assert.equal(requests.filter(request => request.action === "tabs").length, 1);
+      assert.equal(requests.find(request => request.kind === "click").timeoutMs,
+        explicitTimeout ?? 10_000);
+      assert.equal(deadlines[1], explicitTimeout === undefined ? 15_000 : 120_000);
+    } finally {
+      globalThis.fetch = previousFetch;
+      AbortSignal.timeout = previousTimeout;
+    }
+  });
+}
+
+
+test("detects same-tab destination while the native click is still pending", async () => {
+  const previousFetch = globalThis.fetch;
+  const before = "https://www.youtube.com/results?search_query=wave+to+earth";
+  const destination = "https://www.youtube.com/watch?v=M7R7-qnTsFw&list=RDM7R7-qnTsFw&start_radio=1";
+  const requests = [];
+  let finishNativeClick;
+  let nativeClickFinished = false;
+  let tabsCalls = 0;
+  try {
+    globalThis.fetch = async (_url, options) => {
+      const { args } = JSON.parse(options.body);
+      requests.push(args);
+      if (args.kind === "evaluate") {
+        return new Response(JSON.stringify({ ok: true, result: { details: {
+          targetId: "t-early", result: { pageUrl: before, linkUrl: destination },
+        } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (args.kind === "click") {
+        return new Promise(resolve => {
+          finishNativeClick = () => {
+            nativeClickFinished = true;
+            resolve(new Response(JSON.stringify({ ok: false, error: {
+              type: "tool_error", message: "Native click completed after page navigation",
+            } }), { status: 500, headers: { "content-type": "application/json" } }));
+          };
+        });
+      }
+      if (args.action === "tabs") {
+        tabsCalls++;
+        const current = tabsCalls < 2 ? before : destination;
+        return new Response(JSON.stringify({ ok: true, result: { details: {
+          targetId: "t-early", tabs: [
+            { tabId: "t-other", url: destination },
+            { tabId: "t-early", url: current },
+          ],
+        } } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      assert.fail("Unexpected action: " + JSON.stringify(args));
+    };
+    const outcome = await Promise.race([
+      handleBrowserTool("openclaw_browser", {
+        action: "act", kind: "click", tabId: "t-early", ref: "e471",
+        visualFeedback: false,
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Navigation watch was too slow")), 2_000)),
+    ]);
+    assert.equal(outcome.isError, undefined);
+    assert.equal(outcome.diagnostics.stage, "click_navigation_observed");
+    assert.equal(JSON.parse(outcome.content[0].text).url, destination);
+    assert.equal(nativeClickFinished, false);
+    assert.equal(requests.filter(request => request.kind === "click").length, 1);
+    assert.equal(tabsCalls, 2);
+  } finally {
+    finishNativeClick?.();
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("clicks without a known navigation target retain the native timeout", async () => {
+  const previousFetch = globalThis.fetch;
+  const before = "https://example.com";
+  const requests = [];
+  try {
+    globalThis.fetch = async (_url, options) => {
+      const { args } = JSON.parse(options.body);
+      requests.push(args);
+      const output = args.kind === "evaluate"
+        ? { details: { targetId: "t-button", result: { pageUrl: before, linkUrl: null } } }
+        : { content: [{ type: "text", text: '{"ok":true}' }] };
+      return new Response(JSON.stringify({ ok: true, result: output }), {
+        status: 200, headers: { "content-type": "application/json" },
+      });
+    };
+    const result = await handleBrowserTool("openclaw_browser", {
+      action: "act", kind: "click", tabId: "t-button", ref: "e1", visualFeedback: false,
+    });
+    assert.equal(result.isError, undefined);
+    assert.equal(requests.find(request => request.kind === "click").timeoutMs, undefined);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test("normal links keep native click rather than URL substitution", async () => {
   const originalFetch=globalThis.fetch, requests=[];
   try {
