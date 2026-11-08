@@ -44,6 +44,17 @@ test("tool activity distinguishes regular MCP calls from computer use and return
   });
 });
 
+test("native CUA dispatch counts as computer use and clears on refusal", () => {
+  clearMonitorEvents();
+  const regular = beginToolEvent("openclaw_dispatch_action", { id: "session_status" }, "native-regular");
+  const cursor = beginToolEvent("openclaw_dispatch_action", { id: "cua-driver__move_cursor" }, "native-cursor");
+  assert.deepEqual(getCurrentToolActivity(), { state: "computer", activeCount: 2, computerCount: 1, toolCount: 1 });
+  finishToolEvent(cursor, { isError: true, content: [{ type: "text", text: "refused" }] });
+  assert.equal(getCurrentToolActivity().state, "tool");
+  finishToolEvent(regular, { content: [] });
+  assert.equal(getCurrentToolActivity().state, "idle");
+});
+
 test("removing a session deletes its retained logs and suppresses completion of its in-flight calls", () => {
   clearMonitorEvents();
   const removedSession = { id: "agent-monitor-delete-a", task: "delete me" };

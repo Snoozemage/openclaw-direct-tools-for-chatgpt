@@ -1,6 +1,7 @@
 import { agentId, invokeTimeoutMs } from "../../config/runtime.mjs";
 import { gatewayCall, invokeGatewayTool } from "../../openclaw-client.mjs";
 import { listNativeRuntimeTools } from "../runtime/handler.mjs";
+import { listConfiguredMcpTools, invokeConfiguredMcpTool } from "../runtime/configured-mcp.mjs";
 import { buildAvailableToolCatalog, describeTool, searchToolCatalog } from "./engine.mjs";
 import { toolDiscoveryDefinitions } from "./schema.mjs";
 
@@ -15,11 +16,17 @@ async function loadAvailableToolCatalog({ forceRefresh = false } = {}) {
   if (!forceRefresh && cachedCatalog && Date.now() < cachedUntil) return cachedCatalog;
   if (!forceRefresh && catalogPromise) return catalogPromise;
   catalogPromise = (async () => {
-    const [effective, runtimeTools] = await Promise.all([
+    const notices = [];
+    const [effective, runtimeTools, configuredMcp] = await Promise.all([
       gatewayCall("tools.effective", { sessionKey, agentId }, 20000),
       listNativeRuntimeTools(),
+      listConfiguredMcpTools().catch(error => {
+        notices.push({ type: "configured_mcp_unavailable", message: error.message });
+        return [];
+      }),
     ]);
-    const catalog = buildAvailableToolCatalog(effective, runtimeTools);
+    const catalog = buildAvailableToolCatalog(effective, [...runtimeTools, ...configuredMcp]);
+    catalog.notices = notices;
     cachedCatalog = catalog;
     cachedUntil = Date.now() + CATALOG_TTL_MS;
     return catalog;
@@ -78,7 +85,9 @@ function formatDispatchResult(id, result) {
 
 export function createToolDiscoveryHandler({
   loadCatalog = loadAvailableToolCatalog,
-  dispatch = (id, args) => invokeGatewayTool(id, args, sessionKey, invokeTimeoutMs),
+  dispatch = (id, args) => id.startsWith("cua-driver__")
+    ? invokeConfiguredMcpTool(id, args)
+    : invokeGatewayTool(id, args, sessionKey, invokeTimeoutMs),
 } = {}) {
   return async function handleToolDiscovery(name, args = {}) {
     if (!publicNames.has(name)) return undefined;
@@ -87,7 +96,9 @@ export function createToolDiscoveryHandler({
       if (name === "openclaw_tool_search") {
         const catalog = await loadCatalog();
         const matches = searchToolCatalog(catalog, args.query, args.limit ?? 8, args.source);
-        return jsonResult({ query: args.query, count: matches.length, matches }, {
+        return jsonResult({ query: args.query, count: matches.length, matches,
+          ...(catalog.notices?.length ? { notices: catalog.notices } : {}),
+        }, {
           stage: "openclaw_tool_search",
           elapsedMs: Date.now() - startedAt,
           catalogToolCount: catalog.length,

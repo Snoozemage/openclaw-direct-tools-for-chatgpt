@@ -10,6 +10,7 @@ import { host, port, gatewayPort } from "./config/runtime.mjs";
 import { monitorEvents, eventClients, clearMonitorEvents, getCurrentToolActivity, publishMonitorSignal } from "./monitor/events.mjs";
 import { clearSessionsFromMonitor, listSessions, removeSessionFromMonitor } from "./mcp/session-registry.mjs";
 import { mcpHandler } from "./mcp/sdk-server.mjs";
+import { disposeConfiguredMcpRuntime } from "./tools/runtime/configured-mcp.mjs";
 
 const nodeMcpHandler = toNodeHandler(mcpHandler, {
   maxRequestBodySize: 2 * 1024 * 1024,
@@ -200,7 +201,7 @@ function shutdown() {
   }
   eventClients.clear();
   httpServer.close(() => {
-    void mcpHandler.close().finally(() => process.exit(0));
+    void Promise.allSettled([mcpHandler.close(), disposeConfiguredMcpRuntime()]).finally(() => process.exit(0));
   });
   httpServer.closeAllConnections?.();
 }

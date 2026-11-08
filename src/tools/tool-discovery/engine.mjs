@@ -75,7 +75,21 @@ export function buildAvailableToolCatalog(effective, runtimeTools) {
       .map((tool) => [tool.name, tool]),
   );
 
-  // Only return tools with an effective "available" status and a real schema
+  // Gateway previews never open MCP transports. Admit the explicitly configured
+  // CUA tools only after the installed native runtime constructed and policy-
+  // filtered them; never turn an unknown server schema into an execution grant.
+  for (const tool of runtimeTools ?? []) {
+    if (tool.nativePolicyValidated !== true || tool.source !== "mcp"
+      || !tool.name?.startsWith("cua-driver__") || counts.has(tool.name)) continue;
+    entries.push({
+      id: tool.name, name: tool.name, source: "mcp", label: tool.name,
+      description: asText(tool.description), group: "Configured CUA MCP",
+      status: "available", reasons: [],
+    });
+    counts.set(tool.name, 1);
+  }
+
+  // Only return tools with a native policy-approved status and a real schema
   // constructed by the installed runtime. Never infer schemas from summaries.
   return entries.flatMap((entry) => {
     if (entry.status !== "available" || counts.get(entry.id) !== 1) return [];

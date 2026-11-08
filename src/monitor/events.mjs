@@ -40,7 +40,7 @@ export function publishMonitorSignal(signal) {
 
 export function getCurrentToolActivity() {
   const active = [...activeToolEvents.values()];
-  const computerCount = active.filter((event) => event.tool === "openclaw_computer").length;
+  const computerCount = active.filter((event) => event.computer).length;
   return {
     state: computerCount > 0 ? "computer" : active.length > 0 ? "tool" : "idle",
     activeCount: active.length,
@@ -77,7 +77,9 @@ export function removeMonitorEventsForSession(sessionId) {
 export function beginToolEvent(tool, args, requestId, session) {
   const event = { id: nextEventId++, requestId: String(requestId ?? ""), tool, arguments: redact(args), command: redact(eventCommand(args)), method: args?.method, status: "running", startedAt: new Date().toISOString(), finishedAt: null, durationMs: null, output: null, error: null };
   applySession(event, session);
-  activeToolEvents.set(event.id, { id: event.id, tool });
+  const computer = tool === "openclaw_computer"
+    || (tool === "openclaw_dispatch_action" && /^cua-driver__/.test(args?.id ?? ""));
+  activeToolEvents.set(event.id, { id: event.id, tool, computer });
   publishEvent(event);
   publishToolActivity();
   return event;

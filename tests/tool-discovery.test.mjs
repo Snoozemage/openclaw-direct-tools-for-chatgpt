@@ -80,6 +80,23 @@ test("effective inventory includes only available tools with exact runtime schem
   assert.deepEqual(catalog.map((tool) => tool.id), ["memory_search"]);
 });
 
+test("only native policy-approved CUA schemas supplement a cold Gateway MCP preview", () => {
+  const schema = { type: "object", properties: { session: { type: "string" } } };
+  const tools = [
+    { name: "cua-driver__get_agent_cursor_state", source: "mcp", nativePolicyValidated: true, parameters: schema },
+    { name: "cua-driver__click", source: "mcp", parameters: schema },
+    { name: "other__tool", source: "mcp", nativePolicyValidated: true, parameters: schema },
+  ];
+  const catalog = buildAvailableToolCatalog({}, tools);
+  assert.deepEqual(catalog.map(tool => tool.id), ["cua-driver__get_agent_cursor_state"]);
+  assert.deepEqual(describeTool(catalog, "cua-driver__get_agent_cursor_state").inputSchema, schema);
+  const denied = {
+    groups: [{ tools: [{ id: "cua-driver__get_agent_cursor_state", source: "mcp" }] }],
+    toolAccess: { tools: [{ id: "cua-driver__get_agent_cursor_state", status: "unavailable" }] },
+  };
+  assert.deepEqual(buildAvailableToolCatalog(denied, tools), []);
+});
+
 test("compact signatures show requiredness, enum values, and bounded output", () => {
   assert.equal(
     formatInputSignature({
