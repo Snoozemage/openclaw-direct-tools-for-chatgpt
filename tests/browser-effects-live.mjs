@@ -53,8 +53,11 @@ try {
     "AI cursor overlay must install successfully under Trusted Types");
 
   const inspected = await call({ action: "act", kind: "evaluate",
-    fn: '() => ({count:document.querySelector("#count").textContent,overlay:!!document.querySelector("[data-openclaw-browser-feedback]"),enabled:window[Symbol.for("openclaw.browser.feedback.v1")]?.enabled})' });
-  assert.deepEqual(inspected.value?.result, { count: "1", overlay: true, enabled: true });
+    fn: '() => {const state=window[Symbol.for("openclaw.browser.feedback.v1")];return {count:document.querySelector("#count").textContent,overlay:!!document.querySelector("[data-openclaw-browser-feedback]"),enabled:state?.enabled,visible:state?.visible,hostDisplay:state?.host?.style.display,until:state?.until}}' });
+  assert.deepEqual(inspected.value?.result, {
+    count: "1", overlay: true, enabled: true, visible: true,
+    hostDisplay: "block", until: 0,
+  }, "after click, the AI cursor remains visible while action capture ends");
   await new Promise(resolve => setTimeout(resolve, 2000));
   const persistent = await call({ action: "act", kind: "evaluate",
     fn: '() => ({enabled:window[Symbol.for("openclaw.browser.feedback.v1")]?.enabled,position:window[Symbol.for("openclaw.browser.feedback.v1")]?.position,overlay:!!document.querySelector("[data-openclaw-browser-feedback]")})' });
@@ -68,9 +71,9 @@ try {
   assert.equal(jump.value?.outcome,"fragment_navigation_confirmed",
     "in-document link click must complete without a locator timeout");
   const observed=await call({action:"act",kind:"evaluate",
-    fn:"() => ({hash:location.hash,clicks:window.__fragmentClicks})"});
-  assert.deepEqual(observed.value?.result,{hash:"#section",clicks:1},
-    "one DOM click must fire one event and navigate to the intended section");
+    fn:"() => ({hash:location.hash,clicks:window.__fragmentClicks,visible:window[Symbol.for('openclaw.browser.feedback.v1')]?.visible,until:window[Symbol.for('openclaw.browser.feedback.v1')]?.until})"});
+  assert.deepEqual(observed.value?.result,{hash:"#section",clicks:1,visible:true,until:0},
+    "fragment click navigates once and leaves the idle cursor visible");
 
   const second = await call({ action: "open", targetUrl:"http://127.0.0.1:" + server.address().port + "/second",timeoutMs:15000 });
   secondTabId = second.value?.tabId ?? second.value?.targetId;

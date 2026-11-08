@@ -199,7 +199,7 @@ for (const explicitTimeout of [undefined, 30_000]) {
 }
 
 
-test("detects same-tab destination while the native click is still pending", async () => {
+for (const visualFeedback of [false, true]) test(`detects same-tab destination while the native click is still pending (feedback=${visualFeedback})`, async () => {
   const previousFetch = globalThis.fetch;
   const before = "https://www.youtube.com/results?search_query=wave+to+earth";
   const destination = "https://www.youtube.com/watch?v=M7R7-qnTsFw&list=RDM7R7-qnTsFw&start_radio=1";
@@ -212,8 +212,11 @@ test("detects same-tab destination while the native click is still pending", asy
       const { args } = JSON.parse(options.body);
       requests.push(args);
       if (args.kind === "evaluate") {
+        const finishing = args.fn?.includes('"finish":true');
         return new Response(JSON.stringify({ ok: true, result: { details: {
-          targetId: "t-early", result: { pageUrl: before, linkUrl: destination },
+          targetId: "t-early", result: finishing
+            ? { enabled: true, visible: false }
+            : { enabled: true, pageUrl: before, linkUrl: destination },
         } } }), { status: 200, headers: { "content-type": "application/json" } });
       }
       if (args.kind === "click") {
@@ -241,7 +244,7 @@ test("detects same-tab destination while the native click is still pending", asy
     const outcome = await Promise.race([
       handleBrowserTool("openclaw_browser", {
         action: "act", kind: "click", tabId: "t-early", ref: "e471",
-        visualFeedback: false,
+        visualFeedback,
       }),
       new Promise((_, reject) => setTimeout(() => reject(new Error("Navigation watch was too slow")), 2_000)),
     ]);
@@ -251,6 +254,14 @@ test("detects same-tab destination while the native click is still pending", asy
     assert.equal(nativeClickFinished, false);
     assert.equal(requests.filter(request => request.kind === "click").length, 1);
     assert.equal(tabsCalls, 2);
+    const cleanup = requests.filter(request =>
+      request.kind === "evaluate" && request.fn?.includes('"finish":true'));
+    assert.equal(cleanup.length, visualFeedback ? 1 : 0);
+    if (visualFeedback) {
+      assert.equal(cleanup[0].targetId, "t-early");
+      assert.equal(cleanup[0].fn.includes('"activate":true'), false,
+        "cleanup must not create a fresh overlay after a full-page navigation");
+    }
   } finally {
     finishNativeClick?.();
     globalThis.fetch = previousFetch;

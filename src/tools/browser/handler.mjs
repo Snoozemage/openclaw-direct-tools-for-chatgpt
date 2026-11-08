@@ -89,6 +89,17 @@ async function watchLinkNavigation(context, targetId, isStopped) {
   return { kind: "watch_complete" };
 }
 
+async function finishBrowserFeedback(nativeArgs) {
+  if (!nativeArgs.targetId) return;
+  try {
+    await invokeGatewayTool("browser", {
+      action: "act", kind: "evaluate", profile: "chrome",
+      ...pickFeedbackRoute(nativeArgs),
+      fn: browserFeedbackFunction({ finish: true }), timeoutMs: 3000,
+    }, undefined, 4000);
+  } catch {  }
+}
+
 function isPlainFragmentContext(context) {
   return Boolean(context && isPlainFragmentLink(
     context.pageUrl, context.linkUrl, context.linkRawHref,
@@ -330,6 +341,7 @@ export async function handleBrowserTool(name, args = {}) {
     : await nativeRequest;
   observationStopped = true;
   if (first.kind === "navigation") {
+    if (feedback?.available) await finishBrowserFeedback(nativeArgs);
     if (activeFeedbackTab === nativeArgs.targetId) {
       activeFeedbackTab = null; activeFeedbackSyncedAt = 0; activeFeedbackDocumentUrl = null;
     }
@@ -346,15 +358,7 @@ export async function handleBrowserTool(name, args = {}) {
   }
   const result = first.kind === "native" ? first.result : (await nativeRequest).result;
   if (feedback?.available && !autoFragmentProbe) {
-    // Finish only on the same observed tab. Do not guess another active tab.
-    if (nativeArgs.targetId) {
-      try {
-        await invokeGatewayTool("browser", {
-          action: "act", kind: "evaluate", profile: "chrome",
-          ...pickFeedbackRoute(nativeArgs), fn: browserFeedbackFunction({ finish: true, activate: true }), timeoutMs: 3000,
-        });
-      } catch { /* feedback cleanup must never replace the action result */ }
-    }
+    await finishBrowserFeedback(nativeArgs);
     result.diagnostics = { ...result.diagnostics, visualFeedback: feedback };
   } else if (feedback) result.diagnostics = { ...result.diagnostics, visualFeedback: feedback };
   const nativeErrors = result?.ok ? readNativeErrors(result.output) : [];

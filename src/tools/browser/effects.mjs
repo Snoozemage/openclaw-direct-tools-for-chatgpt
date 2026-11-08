@@ -104,6 +104,9 @@ function installFeedback(options, element) {
         this.until=0;
         clearTimeout(fadeTimer);
         hideActionFeedback();
+        border.style.transition="none";
+        ringAnimation?.cancel();
+        trail.style.opacity="0";
       },
       dispose() {
         clearTimeout(fadeTimer); clearTimeout(trailTimer); clearTimeout(idleTimer); ringAnimation?.cancel();
