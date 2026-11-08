@@ -122,9 +122,14 @@ export async function getRecentGatewayToolErrorLog(startedAt, timeoutMs = 10000)
   }
 }
 
+export function shouldCollectGatewayErrorLogs(env = process.env) {
+  return env.OPENCLAW_BRIDGE_ERROR_LOGS === "1";
+}
+
 async function attachGatewayLogDetails(error, startedAt, timeoutMs) {
-  // Preserve the original transport/Gateway error. Add observed log context separately.
-  error.gatewayLogContext = await getRecentGatewayToolErrorLog(startedAt, Math.min(10000, Math.max(3000, timeoutMs)));
+  if (shouldCollectGatewayErrorLogs()) {
+    error.gatewayLogContext = await getRecentGatewayToolErrorLog(startedAt, Math.min(10000, Math.max(3000, timeoutMs)));
+  }
   return error;
 }
 
