@@ -1,40 +1,42 @@
-# Visible CUA cursor feedback on Windows
+# Desktop visual feedback on Windows
 
-The bundled OpenClaw CUA SDK (0.33.4 on the inspected installation) does not accept the current cursor-effect options. Use the separately installed official Cua Driver instead of replacing OpenClaw's pinned SDK.
+Desktop control can show a dedicated AI cursor, click effects and a purple screen border. Cursor effects come from the official Cua Driver; the screen border is provided by this bridge.
 
-Install the standalone Windows driver from https://cua.ai/driver/install.ps1. When installing just for this bridge, opt out of connecting unrelated clients, extra autostart tasks and automatic UI tests:
+## Enable cursor effects
 
-```powershell
-powershell -NoProfile -File <reviewed-installer.ps1> -Release 0.41.3 -NoConnect -NoTest -NoPathUpdate -NoAutoStart
-```
+Cursor effects use a separately installed Cua Driver. This setup was verified with Driver 0.41.3; the bundled CUA SDK 0.33.4 on the inspected OpenClaw installation did not support these options.
 
-From this repository, use the Node runtime bundled with your OpenClaw installation to run:
+1. Download and review the [official Windows installer](https://cua.ai/driver/install.ps1), then run the downloaded file in PowerShell. Replace the installer path below with your saved file:
 
-```text
-node scripts/setup-cua-effects.mjs
-```
+   ```powershell
+   powershell -NoProfile -File <path-to-installer.ps1> -Release 0.41.3 -NoConnect -NoTest -NoPathUpdate -NoAutoStart
+   ```
 
-Set OPENCLAW_CUA_DRIVER_PATH only if the executable is installed outside the normal per-user Cua directory. The script enables the halo, floating cursor, action marks, session badges, movement trail and click ripple/press effects. It then registers a filtered cua-driver MCP server through the Gateway's validated config.patch API with a fresh configuration hash. It preserves the existing authorization posture and does not replace OpenClaw's bundled driver.
+2. From this repository, run the setup helper using the Node runtime bundled with your OpenClaw installation:
 
-Refresh the bridge after registration. The setup helper uses a temporary setup-owned daemon only to write preferences, then stops it. The bridge owns the subsequent CUA MCP process through OpenClaw's native MCP materializer and tool-policy constructor; no agent/model turn is needed. Discovery uses the exact policy-filtered native schemas, and dispatch refreshes configuration before every call, retains native before-call/approval hooks, and also enforces Gateway tool denials. It serializes desktop calls and disposes the MCP runtime on configuration changes or bridge shutdown. On Windows the MCP process owns its runtime; a separate daemon or Scheduled Task is not needed for this connection.
+   ```text
+   node scripts/setup-cua-effects.mjs
+   ```
 
-## Agent use
+   If the driver is installed outside its normal per-user Cua directory, set `OPENCLAW_CUA_DRIVER_PATH` to its executable first. The helper enables the cursor, halo, action marks, session badges, movement trail and click effects, and registers the driver with OpenClaw.
 
-1. Discover tools with openclaw_tool_search, querying cua-driver.
-2. Inspect exact schemas with openclaw_tool_describe.
-3. Call the returned native IDs with openclaw_dispatch_action.
-4. Start a named session with cursor_motion.idle_hide_ms set to 0, then explicitly enable its cursor with set_agent_cursor_enabled. Use the same session for observations, cursor settings and input.
-5. Use fresh references from that CUA runtime; ordinary openclaw_computer frame IDs are from a different execution.
-6. Call end_session in cleanup so the cursor disappears.
+3. Restart the bridge after setup. A separate Cua daemon or Windows Scheduled Task is not required for this connection.
 
-The ordinary openclaw_computer wrapper still uses the paired OpenClaw computer node. Cursor effects use the discovered CUA desktop tools. Both paths now share the screen-border indicator, and their calls are classified as computer activity by the bridge monitor and tray.
+## Use the cursor
+
+Ask the agent to:
+
+1. Search for `cua-driver` with `openclaw_tool_search`, inspect the returned schemas with `openclaw_tool_describe`, and invoke those native tools through `openclaw_dispatch_action`.
+2. Start a named session with `cursor_motion.idle_hide_ms` set to `0`, then enable its cursor with `set_agent_cursor_enabled`.
+3. Use that same session for observations and input, taking fresh observations when the screen changes.
+4. Call `end_session` when finished.
+
+The dedicated cursor appears when using these discovered CUA desktop tools. Ordinary `openclaw_computer` calls use a different execution and cannot share their screenshot references with a CUA session. Both routes show computer activity in the monitor and tray.
 
 ## Screen border
 
-On Windows, a thin purple edge with a soft ten-pixel glow appears for active desktop sessions and stays visible between actions. The last end_session/close_execution closes it. Failed actions do not leave a new active lease; runtime disposal, configuration replacement, bridge shutdown, and five minutes of inactivity clear the relevant leases.
+The purple border appears automatically during active desktop sessions, stays visible between actions, and closes when the last session ends. It also clears after five minutes of inactivity or when the bridge shuts down.
 
-The renderer uses four small per-pixel-alpha windows per monitor, never activates, passes mouse input through, stays out of the taskbar, and excludes its windows from screen captures. Right and bottom positions use the actual window size after Show: WinForms can enlarge the requested ten-pixel strip to sixteen pixels. Run tests/screen-border-geometry.ps1 on Windows to verify the native outer-edge alignment. Display geometry changes rebuild the strips. The helper exits on stdin EOF, parent-process exit, or six seconds without a heartbeat. Rendering failure is reported through GET /api/computer-indicator without interrupting desktop tools or repeatedly launching processes. The helper starts only when desktop work starts and exits after the last lease closes.
+The border lets mouse input pass through and is excluded from screen captures by default. If it does not appear, check `GET /api/computer-indicator` on the local bridge for its status; desktop tools can still run if the indicator fails.
 
-scripts/windows/screen-border.ps1 loads ScreenBorder.cs. The IncludeInCapture switch is for visual verification only; production capture exclusion remains the default.
-
-Cursor visibility indicates visual activity; CUA's own permission checks and OpenClaw's effective tool policy remain authoritative.
+Cursor and border visibility show activity, not task success. OpenClaw and CUA permissions still apply.

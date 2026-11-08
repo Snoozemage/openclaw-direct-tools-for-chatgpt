@@ -27,13 +27,15 @@ Rather than routing every operation through the OpenClaw Main Agent, ChatGPT can
 | Capability | Public tools | What ChatGPT can do |
 |---|---|---|
 | Conversation setup | `start_here` | Load tool-routing and safety instructions once at the start of a ChatGPT conversation. |
-| Browser automation | `openclaw_browser` | Work with Chrome tabs and pages, take screenshots, interact with page elements, manage downloads/uploads and inspect browser diagnostics. |
+| Browser automation | `openclaw_browser` | Work with Chrome tabs/pages, snapshots, downloads/uploads and diagnostics; show browser-local AI cursor/click feedback; highlight targets, record traces, inspect response bodies, and manage page storage and environment overrides. |
 | Desktop automation | `openclaw_computer` | Inspect the Windows screen, use the mouse and keyboard, operate windows/apps, and run bounded action batches. |
 | File operations | `openclaw_ls`, `openclaw_read`, `openclaw_edit`, `openclaw_write`, `openclaw_apply_patch` | List, read, edit, create/replace, and patch local files through OpenClaw's native file tools. Listing and reading support batches. |
 | Local project search | `openclaw_glob`, `openclaw_grep` | Find project paths and search file contents without using a shell for the search itself. |
 | Runtime operations | `openclaw_exec`, `openclaw_process` | Run commands and inspect or control processes started through the runtime wrapper. |
 | Screenshot presentation | `openclaw_image_render` | Display a recent desktop screenshot directly in the ChatGPT conversation using a short-lived reference. |
 | Dynamic tool discovery | `openclaw_tool_search`, `openclaw_tool_describe`, `openclaw_dispatch_action` | Find other eligible tools in the current OpenClaw runtime, inspect their actual schemas, and invoke them when no dedicated bridge wrapper exists. |
+
+See [Browser capabilities](docs/BROWSER_CAPABILITIES.md) for browser actions and feedback controls, and [Desktop visual feedback](docs/CUA_CURSOR_EFFECTS.md) for Windows cursor and screen-border setup.
 
 This is the bridge's public interface, not a promise that every native OpenClaw capability is available in every installation. Availability depends on the runtime version, installed plugins, node hardware, pairing approvals, Gateway policy, and operating-system permissions.
 
