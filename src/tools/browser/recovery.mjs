@@ -4,7 +4,12 @@ export const DEFAULT_OPEN_TIMEOUT_MS = 10_000;
 export const OPEN_RECOVERY_PROBE_TIMEOUT_MS = 5_000;
 
 export function prepareBrowserArgs(args = {}) {
-  const { profile: _profile, browser: _browser, systemProfile: _systemProfile, ...forwardedArgs } = args;
+  const { profile: _profile, browser: _browser, systemProfile: _systemProfile, tabId, visualFeedback: _feedback, ...forwardedArgs } = args;
+  if (tabId !== undefined && forwardedArgs.targetId === undefined) forwardedArgs.targetId = tabId;
+  if (Array.isArray(forwardedArgs.actions)) forwardedArgs.actions = forwardedArgs.actions.map(step => {
+    const { tabId: stepTabId, ...rest } = step;
+    return stepTabId !== undefined && rest.targetId === undefined ? { ...rest, targetId: stepTabId } : rest;
+  });
   const nativeArgs = PROFILE_INDEPENDENT_ACTIONS.has(args.action)
     ? forwardedArgs
     : { ...forwardedArgs, profile: "chrome" };

@@ -2,12 +2,31 @@ import { invokeGatewayTool, getRecentGatewayToolErrorLog } from "../../openclaw-
 import { normalizeToolOutput } from "../../mcp/format.mjs";
 import { browserToolDefinition } from "./schema.mjs";
 import { ensurePersonalChromeRunning } from "./chrome-launch.mjs";
+import { ADVANCED_BROWSER_ACTIONS } from "./advanced-routes.mjs";
+import { invokeAdvancedBrowser } from "./advanced.mjs";
+import { browserFeedbackFunction, feedbackOptions, shouldShowBrowserFeedback } from "./effects.mjs";
 import {
   isBrowserTimeout,
   outputContainsTargetUrl,
   OPEN_RECOVERY_PROBE_TIMEOUT_MS,
   prepareBrowserArgs,
 } from "./recovery.mjs";
+
+function readFeedbackDetails(output) {
+  const details = output?.details;
+  if (details?.targetId) return details;
+  for (const item of output?.content ?? []) {
+    if (item.type !== "text") continue;
+    const start = item.text.indexOf("\n---\n"), end = item.text.lastIndexOf("\n<<<END_EXTERNAL_UNTRUSTED_CONTENT");
+    const json = start >= 0 && end > start ? item.text.slice(start + 5, end) : item.text;
+    try { return JSON.parse(json); } catch { /* native text may not be JSON */ }
+  }
+  return {};
+}
+
+function pickFeedbackRoute(args) {
+  return Object.fromEntries(["targetId", "target", "node", "dashboard"].filter(key => args[key] !== undefined).map(key => [key, args[key]]));
+}
 
 function readNativeErrors(output) {
   return (output?.content ?? []).flatMap((item) => {
@@ -72,7 +91,19 @@ async function reconcileTimedOutOpen(args, nativeArgs, originalResult) {
 export async function handleBrowserTool(name, args = {}) {
   if (name !== browserToolDefinition.name) return undefined;
 
-  const nativeArgs = prepareBrowserArgs(args);
+  let nativeArgs = prepareBrowserArgs(args);
+  if (ADVANCED_BROWSER_ACTIONS.includes(args.action)) {
+    const result = await invokeAdvancedBrowser(nativeArgs);
+    return { ...normalizeToolOutput(result), diagnostics: result.diagnostics ?? result.error };
+  }
+  if (args.action === "effects") {
+    const result = await invokeGatewayTool("browser", {
+      ...nativeArgs, action: "act", kind: "evaluate",
+      fn: browserFeedbackFunction({ enabled: args.enabled !== false, force: true }),
+    });
+    const errors = result.ok ? readNativeErrors(result.output) : [];
+    return { ...normalizeToolOutput(result), ...(errors.length ? { isError: true } : {}), diagnostics: { stage: "browser_visual_feedback", ...result.diagnostics } };
+  }
   let chromeLaunch = { launched: false };
   if (args.action === "open" && nativeArgs.profile === "chrome") {
     try {
@@ -92,8 +123,36 @@ export async function handleBrowserTool(name, args = {}) {
     }
   }
 
+  let feedback;
+  if (shouldShowBrowserFeedback(args)) {
+    const { ref, options } = feedbackOptions(args);
+    try {
+      const probe = await invokeGatewayTool("browser", {
+        action: "act", kind: "evaluate", profile: "chrome",
+        ...pickFeedbackRoute(nativeArgs), ...(ref ? { ref } : {}),
+        fn: browserFeedbackFunction(options), timeoutMs: 5000,
+      });
+      const errors = probe.ok ? readNativeErrors(probe.output) : [];
+      const details = readFeedbackDetails(probe.output);
+      const enabled = details.result?.enabled !== false;
+      feedback = { available: probe.ok && !errors.length && enabled, ...(probe.ok && !errors.length && enabled ? {} : { reason: !enabled ? "Browser effects disabled for this document" : probe.error?.message ?? errors[0]?.error ?? errors[0]?.message ?? "Browser feedback unavailable" }) };
+      if (probe.ok && !errors.length && details.targetId && !nativeArgs.targetId) nativeArgs = { ...nativeArgs, targetId: details.targetId };
+    } catch (error) { feedback = { available: false, reason: error.message }; }
+  }
   const startedAt = Date.now();
   const result = await invokeGatewayTool("browser", nativeArgs);
+  if (feedback?.available) {
+    // Finish only on the same observed tab. Do not guess another active tab.
+    if (nativeArgs.targetId) {
+      try {
+        await invokeGatewayTool("browser", {
+          action: "act", kind: "evaluate", profile: "chrome",
+          ...pickFeedbackRoute(nativeArgs), fn: browserFeedbackFunction({ finish: true }), timeoutMs: 3000,
+        });
+      } catch { /* feedback cleanup must never replace the action result */ }
+    }
+    result.diagnostics = { ...result.diagnostics, visualFeedback: feedback };
+  } else if (feedback) result.diagnostics = { ...result.diagnostics, visualFeedback: feedback };
   const nativeErrors = result?.ok ? readNativeErrors(result.output) : [];
   const failed = !result?.ok || nativeErrors.length > 0;
   if (args.action === "open" && failed && isBrowserTimeout(result)) {

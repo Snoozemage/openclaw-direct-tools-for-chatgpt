@@ -1,8 +1,11 @@
+import { ADVANCED_BROWSER_ACTIONS } from "./advanced-routes.mjs";
+
 export const BROWSER_ACTIONS = Object.freeze([
   "doctor", "status", "start", "stop", "profiles", "importprofile",
   "tabs", "open", "focus", "close", "snapshot", "screenshot",
   "navigate", "console", "requests", "errors", "text", "emulate",
   "pdf", "download", "waitfordownload", "upload", "dialog", "act",
+  ...ADVANCED_BROWSER_ACTIONS, "effects",
 ]);
 
 export const BROWSER_ACT_KINDS = Object.freeze([
@@ -26,7 +29,7 @@ const actProperties = {
   ref: string("Element ref from the latest snapshot. Include it on every action that targets this element; refs are not inherited from earlier batch actions."),
   selector: string("CSS selector for the element targeted by this action. Include it on each target-based action when no ref is used; selectors are not inherited from earlier batch actions."),
   text: string("Text to type, or a text condition for wait."),
-  key: string("Key for kind=press, such as Enter, Escape, Tab or Control+Shift+T."),
+  key: string("Key for kind=press, such as Enter, Escape, Tab or Control+Shift+T; for action=storage, the exact storage key, preserving surrounding whitespace."),
   submit: boolean("Submit after typing where supported."),
   slowly: boolean("Type slowly where supported."),
   doubleClick: boolean("Double-click where supported."),
@@ -60,7 +63,7 @@ const actProperties = {
   width: integer("Viewport width for resize."),
   height: integer("Viewport height for resize."),
   timeMs: integer("Wait duration in milliseconds."),
-  url: string("URL condition for kind=wait. For open/navigate, use targetUrl."),
+  url: string("URL condition for kind=wait; URL or glob for action=responsebody, which waits for the next matching response rather than reading past responses. For cookies/get, optionally supply a same-origin URL to scope the extension compatibility read. For open/navigate, use targetUrl."),
   loadState: string("Page load state supported by OpenClaw."),
   textGone: string("Wait until this text disappears."),
   fn: string("For kind=evaluate, pass a function expression, not an immediately invoked function expression (IIFE) or its return value. For kind=wait, pass a supported wait condition."),
@@ -69,13 +72,38 @@ const actProperties = {
 
 const properties = {
   action: { type: "string", enum: BROWSER_ACTIONS, description: "Browser action to execute." },
+  operation: string("trace: start|stop; cookies: get|set|setMany|clear; storage: get|set|clear. Cookies/storage default to get. For cookies, always supply tabId or targetId; cookies default to the local host. Extension compatibility reads are limited to the bound HTTP(S) tab URL (or same-origin url) and support a cookie-name filter. Compatibility writes require that origin/host; clear is not emulated."),
+  storageKind: { type: "string", enum: ["local", "session"], description: "Storage area for action=storage." },
+  value: string("Value for action=storage, operation=set; key is the storage key."),
+  cookie: {
+    type: "object", description: "Cookie for cookies/set: name, value, and url or domain+path; optional expires, httpOnly, secure, sameSite. Supply tabId or targetId. Compatible local Chrome extension connections use authenticated tab-session routing when browser-root Storage commands are missing.",
+    properties: { name: string("Cookie name."), value: string("Cookie value."), url: string("Cookie URL scope."), domain: string("Cookie domain."), path: string("Cookie path."), expires: { type: "number" }, httpOnly: { type: "boolean" }, secure: { type: "boolean" }, sameSite: { type: "string", enum: ["Strict", "Lax", "None"] } },
+    required: ["name", "value"], additionalProperties: false,
+  },
+  cookies: { type: "array", items: { type: "object", additionalProperties: true }, description: "Cookie objects for cookies/setMany." },
+  setting: { type: "string", enum: ["offline", "headers", "credentials", "geolocation", "media", "timezone", "locale", "device", "viewport"], description: "Setting for action=set. Reversible page/browser-context overrides; restore after testing." },
+  offline: boolean("Offline mode for set/offline."),
+  headers: { type: "object", additionalProperties: { type: "string" }, description: "Extra HTTP headers for set/headers; {} resets them." },
+  username: string("HTTP basic-auth username for set/credentials."),
+  password: string("HTTP basic-auth password for set/credentials; clear=true removes credentials."),
+  latitude: { type: "number", minimum: -90, maximum: 90 },
+  longitude: { type: "number", minimum: -180, maximum: 180 },
+  accuracy: { type: "number", minimum: 0 },
+  origin: string("Exact http(s) origin for geolocation or permissions."),
+  permissions: stringArray("Explicitly requested browser permissions for action=permissions; grant only when authorized for that origin."),
+  optionalPermissions: stringArray("Optional permissions for action=permissions."),
+  screenshots: boolean("Include screenshots in trace/start."),
+  snapshots: boolean("Include DOM snapshots in trace/start."),
+  sources: boolean("Include sources in trace/start."),
+  enabled: boolean("action=effects: show or remove browser-local AI cursor, target outline and click feedback; enabled by default."),
+  visualFeedback: boolean("Show browser-local feedback for this act call, default true. Requires native page evaluation; unavailable feedback never retries or blocks the action."),
   target: string("Native execution target, where supported."),
   dashboard: string("Browser dashboard selector, where supported."),
   node: string("Paired browser-node selector, where supported."),
   into: string("Destination profile for importprofile."),
   domains: stringArray("Domain filters for importprofile."),
   targetUrl: string("Destination URL for open or navigate."),
-  label: string("Optional browser tab label."),
+  label: string("Optional stable browser tab label: 1-64 letters/numbers or _, ., :, -. Spaces are not supported."),
   limit: integer("Maximum number of returned tabs, errors, requests or results."),
   maxChars: integer("Maximum snapshot or text output size."),
   mode: string("Snapshot mode supported by OpenClaw."),
@@ -89,11 +117,11 @@ const properties = {
   fullPage: boolean("Capture a full-page screenshot."),
   element: string("Element ref or selector for screenshot or file-input actions."),
   type: string("Screenshot format or a native field type where applicable."),
-  path: string("Output path for screenshot, PDF or download actions."),
+  path: string("Output path for screenshot, PDF, download or trace/stop; native output-directory restrictions apply."),
   urls: boolean("Include URLs in results where supported."),
   level: string("Console or error level filter."),
-  filter: string("Substring filter for captured network requests."),
-  clear: boolean("Clear collected records after reading where supported."),
+  filter: string("Substring filter for captured network requests or cookie names on extension compatibility reads."),
+  clear: boolean("Clear collected records after reading where supported; for set/credentials or set/geolocation, clear that override."),
   query: string("Snapshot filter."),
   device: string("Device profile for emulate."),
   colorScheme: string("Color scheme for emulate."),
@@ -123,7 +151,7 @@ const properties = {
 
 export const browserToolDefinition = {
   name: "openclaw_browser",
-  description: "Control Chrome through OpenClaw. Use action=open or navigate with targetUrl; if Chrome is not running, use open to launch it and open the requested URL. Use snapshot before page interactions, then pass its refs to action=act. For predictable multi-step interactions, use action=act with kind=batch and an ordered actions array when supported. Every element-targeting action must include its own ref or selector; click targets are not inherited by later type, fill, or press actions. For type, always repeat ref or selector on the type step, even after clicking the field. Batch entries are act kinds, not open, navigate, snapshot, or screenshot. Page-changing steps can invalidate refs. Batch stops on the first error by default; stopOnError:false continues.",
+  description: "Control Chrome through OpenClaw. Use action=open or navigate with targetUrl; if Chrome is not running, use open to launch it and open the requested URL. Use snapshot before page interactions, then pass its refs to action=act. For predictable multi-step interactions, use action=act with kind=batch and an ordered actions array when supported. Every element-targeting action must include its own ref or selector; click targets are not inherited by later type, fill, or press actions. For type, always repeat ref or selector on the type step, even after clicking the field. Batch entries are act kinds, not open, navigate, snapshot, or screenshot. Page-changing steps can invalidate refs. Batch stops on the first error by default; stopOnError:false continues. Extra actions: highlight(ref), trace(operation=start|stop), responsebody(url), cookies(operation), storage(storageKind,operation,key,value), set(setting), permissions(origin,permissions), dialogs, effects(enabled). Clear cookies/storage only when explicitly requested; effects provide visual feedback and do not move the system pointer.",
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   inputSchema: {
     type: "object",

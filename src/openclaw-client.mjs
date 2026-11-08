@@ -5,7 +5,7 @@ import { root, runtimeNode, openclawCli, gatewayPort, gatewayToken, agentId, inv
 import { jsonText } from "./mcp/format.mjs";
 const execFile = promisify(execFileCallback);
 
-export async function gatewayCall(method, params = {}, timeoutMs = 20000) {
+export async function gatewayCall(method, params = {}, timeoutMs = 20000, { safeError = false, signal } = {}) {
   const args = [
     openclawCli, "gateway", "call", method,
     "--json", "--params", JSON.stringify(params), "--timeout", String(timeoutMs),
@@ -13,10 +13,19 @@ export async function gatewayCall(method, params = {}, timeoutMs = 20000) {
   let stdout;
   try {
     ({ stdout } = await execFile(runtimeNode, args, {
-      cwd: root, env: process.env, windowsHide: true,
+      cwd: root, env: process.env, windowsHide: true, signal,
       timeout: timeoutMs + 5000, maxBuffer: 32 * 1024 * 1024, encoding: "utf8",
     }));
   } catch (error) {
+    if (safeError) {
+      // Child-process errors repeat the command line, including serialized
+      // Browser cookies, credentials or headers. Never echo it for this surface.
+      let message = "request failed";
+      for (const output of [error.stdout, error.stderr]) {
+        try { const value = JSON.parse(output); message = value.error?.message ?? message; } catch {}
+      }
+      throw new Error("OpenClaw Gateway call " + method + " failed: " + message);
+    }
     const details = [error.stderr, error.stdout, error.message].filter(Boolean).join("\n").slice(-4000);
     throw new Error("OpenClaw Gateway call " + method + " failed: " + details);
   }
