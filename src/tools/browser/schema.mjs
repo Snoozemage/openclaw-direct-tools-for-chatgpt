@@ -132,7 +132,7 @@ const properties = {
   dialogId: string("Target dialog ID."),
   accept: boolean("Accept or dismiss a dialog."),
   promptText: string("Text for a prompt dialog."),
-  kind: { type: "string", enum: BROWSER_ACT_KINDS, description: "Operation for action=act. Use kind=batch with an ordered actions array for predictable multi-step interactions in one /act request." },
+  kind: { type: "string", enum: BROWSER_ACT_KINDS, description: "Operation for action=act. Default to kind=batch when two or more consecutive necessary actions are predictable on the same tab; pass an ordered actions array. Use a single action when only one is needed." },
   ...actProperties,
   timeoutMs: integer("Timeout in milliseconds, where supported by the native action."),
   actions: {
@@ -151,7 +151,7 @@ const properties = {
 
 export const browserToolDefinition = {
   name: "openclaw_browser",
-  description: "Control Chrome through OpenClaw. Use action=open or navigate with targetUrl; if Chrome is not running, use open to launch it and open the requested URL. Use snapshot before page interactions, then pass its refs to action=act. For predictable multi-step interactions, use action=act with kind=batch and an ordered actions array when supported. Every element-targeting action must include its own ref or selector; click targets are not inherited by later type, fill, or press actions. For type, always repeat ref or selector on the type step, even after clicking the field. Batch entries are act kinds, not open, navigate, snapshot, or screenshot. Page-changing steps can invalidate refs. Batch stops on the first error by default; stopOnError:false continues. Extra actions: highlight(ref), trace(operation=start|stop), responsebody(url), cookies(operation), storage(storageKind,operation,key,value), set(setting), permissions(origin,permissions), dialogs, effects(enabled). Clear cookies/storage only when explicitly requested; effects provide visual feedback and do not move the system pointer.",
+  description: "Control Chrome through OpenClaw. Use action=open or navigate with targetUrl; if Chrome is not running, use open to launch it and open the requested URL. Use snapshot before page interactions, then pass its refs to action=act. Prefer action=act with kind=batch for two or more necessary predictable interactions on the same tab. Use direct single actions otherwise; do not add redundant hover, scrollIntoView, wait or delayMs just to create a batch. Every element-targeting action must include its own ref or selector; click targets are not inherited by later type, fill, or press actions. For type, always repeat ref or selector on the type step, even after clicking the field. Batch entries are act kinds, not open, navigate, snapshot, or screenshot. Page-changing steps can invalidate refs. Batch stops on the first error by default; stopOnError:false continues. Extra actions: highlight(ref), trace(operation=start|stop), responsebody(url), cookies(operation), storage(storageKind,operation,key,value), set(setting), permissions(origin,permissions), dialogs, effects(enabled). Clear cookies/storage only when explicitly requested; effects provide visual feedback and do not move the system pointer.",
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   inputSchema: {
     type: "object",
