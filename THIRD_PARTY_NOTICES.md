@@ -1,6 +1,6 @@
 # Third-party notices
 
-## OpenChatX — Windows Credential Manager interop
+## OpenChatX - Windows Credential Manager interop
 
 The Windows Credential Manager interop helper in `scripts/windows/WindowsCredentialStore.cs` is adapted from `WindowsCredentialStore` in OpenChatX:
 

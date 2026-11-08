@@ -264,7 +264,7 @@ export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT
           const actionFailed = Boolean(result?.isError);
           failed ||= actionFailed;
           results.push({ index, action: step.action, isError: actionFailed });
-          content.push({ type: "text", text: "Batch action " + (index + 1) + "/" + args.actions.length + ": " + step.action + (actionFailed ? " — FAILED" : " — completed") });
+          content.push({ type: "text", text: "Batch action " + (index + 1) + "/" + args.actions.length + ": " + step.action + (actionFailed ? " - FAILED" : " - completed") });
           for (const item of result?.content ?? []) content.push(item);
 
           if (actionFailed && stopOnError) break;

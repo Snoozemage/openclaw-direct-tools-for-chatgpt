@@ -1,7 +1,7 @@
 const $=id=>document.getElementById(id);
 let events=[],sessions=[],selectedEvent=null,selectedSession="all",source=null;
 let blockValues=Object.create(null),blockModes=Object.create(null),blockDepths=Object.create(null),diffModes=Object.create(null),manualDiffModes=Object.create(null);
-function fmtTime(v){try{return v?new Date(v).toLocaleTimeString():"—"}catch{return "—"}}
+function fmtTime(v){try{return v?new Date(v).toLocaleTimeString():"-"}catch{return "-"}}
 function pretty(v){return typeof v==="string"?v:JSON.stringify(v,null,2)}
 function rawValue(v){return v==null?"(empty)":pretty(v)}
 function structuredValue(v){
