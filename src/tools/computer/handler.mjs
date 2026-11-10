@@ -202,7 +202,30 @@ export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT
     return result;
   }
 
-  return async function handleComputerTool(name, args = {}, dependencies = {}) {
+  async function closeAllExecutions() {
+    const active = [...sessions.values()];
+    const results = await Promise.all(active.map(session => enqueue(queues, session.key, async () => {
+      if (sessions.get(session.key) !== session) return { closed: true };
+      try {
+        const result = await closeSession(session, "bridge-tray-close", 10000);
+        return { closed: result?.isError !== true };
+      } catch {
+        if (sessions.get(session.key) === session) {
+          session.lastUsedAt = Date.now();
+          scheduleIdleCleanup(session);
+        }
+        return { closed: false };
+      }
+    })));
+    indicator?.clear("legacy:");
+    return {
+      attempted: active.length,
+      closed: results.filter(result => result.closed).length,
+      failed: results.filter(result => !result.closed).length,
+    };
+  }
+
+  const handleComputerTool = async function handleComputerTool(name, args = {}, dependencies = {}) {
     if (name !== computerToolDefinition.name) return undefined;
 
     const invoke = dependencies.invokeNodeCommand ?? invokeNodeCommand;
@@ -310,6 +333,9 @@ export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT
       };
     });
   };
+  handleComputerTool.closeAllExecutions = closeAllExecutions;
+  handleComputerTool.activeExecutionCount = () => sessions.size;
+  return handleComputerTool;
 }
 
 export const handleComputerTool = createComputerToolHandler({ indicator: screenBorder });

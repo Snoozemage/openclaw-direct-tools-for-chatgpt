@@ -132,6 +132,51 @@ test("close_execution uses OpenClaw's internal close command and releases the ac
   assert.notEqual(calls[2][2].executionId, firstId);
 });
 
+test("tray closes tracked Computer executions using the real native close command", async () => {
+  const calls = [];
+  const indicatorEvents = [];
+  const handle = createComputerToolHandler({
+    idleTimeoutMs: 0,
+    indicator: {
+      open: key => indicatorEvents.push(["open", key]),
+      close: key => indicatorEvents.push(["close", key]),
+      clear: prefix => indicatorEvents.push(["clear", prefix]),
+    },
+  });
+  const deps = { node: "tray-test-node", invokeNodeCommand: fakeInvoker(calls) };
+  await handle("openclaw_computer", { action: "snapshot" }, deps);
+  assert.equal(handle.activeExecutionCount(), 1);
+  const firstId = calls[0][2].executionId;
+  const result = await handle.closeAllExecutions();
+  assert.deepEqual(result, { attempted: 1, closed: 1, failed: 0 });
+  assert.equal(handle.activeExecutionCount(), 0);
+  assert.deepEqual(calls[1][2], {
+    action: "__close_execution",
+    executionId: firstId,
+    reason: "bridge-tray-close",
+  });
+  assert.ok(indicatorEvents.some(event => event[0] === "clear" && event[1] === "legacy:"));
+  assert.deepEqual(await handle.closeAllExecutions(), { attempted: 0, closed: 0, failed: 0 });
+});
+
+test("tray reports a native close error and retains the execution for retry", async () => {
+  const calls = [];
+  let failClose = true;
+  const handle = createComputerToolHandler({ idleTimeoutMs: 0 });
+  const invoke = async (...args) => {
+    calls.push(args);
+    return args[2].action === "__close_execution" && failClose
+      ? { isError: true, content: [] } : { content: [] };
+  };
+  await handle("openclaw_computer", { action: "snapshot" },
+    { node: "retry-test-node", invokeNodeCommand: invoke });
+  assert.deepEqual(await handle.closeAllExecutions(), { attempted: 1, closed: 0, failed: 1 });
+  assert.equal(handle.activeExecutionCount(), 1);
+  failClose = false;
+  assert.deepEqual(await handle.closeAllExecutions(), { attempted: 1, closed: 1, failed: 0 });
+  assert.equal(handle.activeExecutionCount(), 0);
+});
+
 test("an explicit different executionId closes the previous bridge-owned execution first", async () => {
   const calls = [];
   const handle = createComputerToolHandler({ idleTimeoutMs: 0 });

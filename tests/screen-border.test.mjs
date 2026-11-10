@@ -75,10 +75,17 @@ test("CUA sessions retain the border between calls and clear on end or transport
   await lifecycle.run("cua-driver__get_agent_cursor_state", { session: "one" }, async () => ({ content: [] }));
   assert.equal(f.controller.getStatus().sessionCount, 1);
   await lifecycle.run("cua-driver__start_session", { session: "two" }, async () => ({ content: [] }));
+  assert.deepEqual(lifecycle.activeSessions(), ["one", "two"]);
   await lifecycle.run("cua-driver__end_session", { session: "one" }, async () => ({ content: [] }));
+  assert.deepEqual(lifecycle.activeSessions(), ["two"]);
   assert.equal(f.controller.getStatus().sessionCount, 1);
   await assert.rejects(lifecycle.run("cua-driver__click", { session: "two" }, async () => { throw new Error("disconnected"); }), /disconnected/);
   assert.equal(f.controller.getStatus().active, false);
+  assert.deepEqual(lifecycle.activeSessions(), ["two"], "failed input must not lose the session needed for manual close");
+  await lifecycle.run("cua-driver__end_session", { session: "two" }, async () => ({ content: [] }));
+  assert.deepEqual(lifecycle.activeSessions(), []);
+  lifecycle.clear();
+  assert.deepEqual(lifecycle.activeSessions(), []);
 });
 
 test("refused CUA work never leaves a persistent border", async () => {
