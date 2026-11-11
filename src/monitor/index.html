@@ -3,28 +3,72 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>OpenClaw × ChatGPT</title>
+<meta name="theme-color" content="#d8dbe1">
+<title>OpenClaw Bridge · Monitor</title>
 <link rel="stylesheet" href="/monitor/assets/json-formatter.css">
 <link rel="stylesheet" href="/monitor/assets/diff2html.css">
 <link rel="stylesheet" href="/monitor/assets/monitor.css">
 </head>
 <body>
-<header>
-  <div class="brand">OpenClaw <span>× ChatGPT</span></div>
-  <div class="status"><i id="dot" class="dot"></i><span id="connection">Connecting to local bridge…</span><button id="clear" class="action" title="Clear in-memory tool-call history">Clear</button><button id="refresh" class="action">Refresh</button><button id="restart" class="action danger" title="Restart only the local MCP bridge; Gateway and Tunnel are left running">Restart</button></div>
+<header class="topbar">
+  <div class="brand-lockup" aria-label="OpenClaw ChatGPT Bridge">
+    <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+    <div class="brand-copy"><div class="brand-name">OpenClaw <span>×</span> ChatGPT</div></div>
+  </div>
+  <div class="status">
+    <div class="connection-pill" role="status"><i id="dot" class="dot"></i><span id="connection">Connecting to local bridge…</span></div>
+    <div class="header-actions">
+      <button id="refresh" type="button" class="action" title="Refresh current activity">Refresh</button>
+      <button id="clear" type="button" class="action" title="Clear in-memory tool-call history">Clear</button>
+      <span class="action-divider" aria-hidden="true"></span>
+      <button id="restart" type="button" class="action danger" title="Restart only the local MCP bridge; Gateway and Tunnel are left running">Restart bridge</button>
+    </div>
+  </div>
 </header>
 <div class="layout">
-  <aside>
-    <div class="panel-title"><span>ChatGPT Sessions</span></div>
-    <div id="sessions" class="tools"></div>
-    <div class="separator"></div>
-    <div class="panel-title call-filter-title"><div class="call-title-row"><span>Tool calls</span><button id="followLatest" type="button" class="action follow-toggle" aria-pressed="true" title="Automatically show each new tool call">Following latest</button></div><div class="filters"><input id="callSearch" type="search" placeholder="Search calls…" aria-label="Search tool calls" autocomplete="off"><select id="filter" aria-label="Filter tool call status"><option value="all">All statuses</option><option value="running">Running</option><option value="success">Success</option><option value="error">Error</option></select></div></div>
-    <div id="calls" class="tools"></div>
-  </aside>
-  <main>
-    <div class="summary"><div class="stat"><div class="statlabel">Running now</div><div id="running" class="statvalue">0</div></div><div class="stat"><div class="statlabel">Completed</div><div id="completed" class="statvalue">0</div></div><div class="stat"><div class="statlabel">Errors</div><div id="errors" class="statvalue">0</div></div></div>
-    <section id="detail" class="detail"><div class="empty">Waiting for a tool call.<br>Make a request in ChatGPT and it will appear here.</div></section>
-    <div class="foot">Local-only bridge activity · session IDs are shown as local aliases · sensitive values are redacted where detected · up to 200 newest tool events are kept in memory. Session activity becomes inactive after 30 seconds without a request.</div>
+  <section class="activity-pane" aria-label="Live tool calls">
+    <div class="pane-header activity-header">
+      <div class="eyebrow">TOOL MONITOR</div>
+      <div class="pane-title-row"><h1>Activity</h1><span id="activityCount" class="activity-count" aria-label="Visible tool calls">0 calls</span></div>
+      <p class="pane-description">Follow what's happening, one call at a time.</p>
+      <div class="session-switcher" aria-label="Select ChatGPT session">
+        <div class="session-toolbar">
+          <div class="panel-title"><span>ChatGPT Sessions</span></div>
+          <span id="scopeCount" class="scope-count">0 chats</span>
+        </div>
+        <div id="sessions" class="tools sessions-list" role="group" aria-label="Filter by conversation"></div>
+      </div>
+      <div class="filters">
+        <div class="search-field">
+          <svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8.6" cy="8.6" r="5.6"></circle><path d="m13 13 4 4"></path></svg>
+          <input id="callSearch" type="search" placeholder="Search tool calls…" aria-label="Search tool calls" autocomplete="off">
+          <kbd>/</kbd>
+        </div>
+        <select id="filter" aria-label="Filter tool call status"><option value="all">All statuses</option><option value="running">Running</option><option value="success">Success</option><option value="error">Error</option></select>
+      </div>
+    </div>
+    <div class="activity-scroll"><div id="calls" class="tools calls-list"></div></div>
+    <div class="stream-footer">Newest first <span aria-hidden="true">·</span> Select a call to inspect</div>
+  </section>
+  <main class="inspector-pane" aria-label="Tool call inspector">
+    <div class="inspector-sticky">
+      <div class="inspector-header">
+        <div class="eyebrow">INSPECTOR</div>
+        <div class="inspector-title-row">
+          <h2>Call details</h2>
+          <button id="followLatest" type="button" class="action follow-toggle" aria-pressed="true" title="Automatically show each new tool call">Following latest</button>
+        </div>
+        <div id="agentContext" class="agent-context" aria-label="Selected session information">
+          <span class="agent-context-placeholder">Select a call to see its session.</span>
+        </div>
+      </div>
+      <div class="summary" aria-label="Activity counts">
+        <div class="stat stat-running"><span class="statlabel">Running</span><strong id="running" class="statvalue">0</strong></div>
+        <div class="stat stat-completed"><span class="statlabel">Completed</span><strong id="completed" class="statvalue">0</strong></div>
+        <div class="stat stat-errors"><span class="statlabel">Errors</span><strong id="errors" class="statvalue">0</strong></div>
+      </div>
+    </div>
+    <section id="detail" class="detail" aria-live="off"><div class="empty">Waiting for a tool call.<span>Make a request in ChatGPT and it will appear here.</span></div></section>
   </main>
 </div>
 <script src="/monitor/assets/json-formatter.js"></script>

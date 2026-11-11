@@ -281,7 +281,7 @@ test("monitor displays the session count only once inside the All sessions card"
   assert.match(html, /data-diff-mode=/u);
   assert.match(html, /json-formatter\.css/u);
   assert.match(html, /events=events\.filter\(event=>event\.sessionId!==e\.sessionId\)/u);
-  assert.match(html, /if\(e\.type==="clear"\)\{events=\[\];sessions=\[\]/u);
+  assert.match(html, /if\(e\.type==="clear"\)\{\s*events=\[\];sessions=\[\];selectedSession="all";selectedEvent=null;/u);
   assert.match(html, /clearedSessionCount/u);
   assert.doesNotMatch(html, /themeToggle|monitor-theme|data-theme="light"|copyHistory|Copy log|data-copy-block=/u);
   assert.doesNotMatch(html, /cdn\.jsdelivr\.net|unpkg\.com/u);
