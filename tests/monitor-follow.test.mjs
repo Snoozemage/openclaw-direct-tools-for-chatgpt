@@ -43,8 +43,8 @@ function setupMonitor(storage) {
         return sessionButtons;
       }
       if (selector === "[data-depth-block]") {
-        depthButtons = [...element("detail").innerHTML.matchAll(/data-depth-block="([^"]+)"/g)]
-          .map(([, depthBlock]) => ({ dataset: { depthBlock } }));
+        depthButtons = [...element("detail").innerHTML.matchAll(/data-depth-block="([^"]+)" data-depth-action="([^"]+)"/g)]
+          .map(([, depthBlock, depthAction]) => ({ dataset: { depthBlock, depthAction } }));
         return depthButtons;
       }
       if (selector !== ".call-open") return [];
@@ -88,9 +88,9 @@ function setupMonitor(storage) {
       assert.ok(button, "expected session " + id);
       button.onclick();
     },
-    clickDepth(key) {
-      const button = depthButtons.find(b => b.dataset.depthBlock === key);
-      assert.ok(button, "expected depth control for " + key);
+    clickDepth(key, action = "collapse") {
+      const button = depthButtons.find(b => b.dataset.depthBlock === key && b.dataset.depthAction === action);
+      assert.ok(button, "expected " + action + " control for " + key);
       button.onclick();
     },
   };
@@ -172,7 +172,7 @@ test("arguments are expanded above output, without a redundant command section",
   assert.ok(detail.includes('id="payload-output"'));
   assert.match(detail, /data-section-key="arguments"[^>]* open>/u);
   assert.doesNotMatch(detail, /Command \/ operation|data-section-key="operation"/u);
-  assert.match(detail, /data-depth-block="arguments">Expand deeper/u);
+  assert.match(detail, /data-depth-block="arguments" data-depth-action="collapse">Collapse/u);
 });
 
 test("Follow latest stays on its agent until a different agent is selected", () => {
@@ -217,25 +217,67 @@ test("filtering another agent never changes the follow target", () => {
   assert.equal(monitor.selected(), 3);
 });
 
-test("Expand deeper opens every level, and Collapse closes nested JSON", () => {
+test("Collapse decreases JSON depth one level at a time; Expand opens everything", () => {
   const monitor = setupMonitor();
   monitor.run('window.JSONFormatter=class {constructor(data,depth){window.depth=depth}render(){return {}}}');
-  monitor.run('apply({id:1,tool:"test_tool",status:"running",sessionId:"session-a",arguments:{nested:{more:{deep:{value:1}}}},startedAt:"2026-11-11T03:00:00Z"})');
-  assert.equal(monitor.run("window.depth"), 2);
+  monitor.run('apply({id:1,tool:"test_tool",status:"running",sessionId:"session-a",arguments:{nested:{more:{deep:{value:1}}}},output:{result:{nested:{message:"OK"}}},startedAt:"2026-11-11T03:00:00Z"})');
+  assert.equal(monitor.run("treeDepth('arguments')"), Infinity);
+  assert.equal(monitor.run("treeDepth('output')"), Infinity);
+  assert.match(monitor.elements.get("detail").innerHTML, /data-depth-block="arguments" data-depth-action="collapse">Collapse/u);
+  assert.match(monitor.elements.get("detail").innerHTML, /data-depth-block="output" data-depth-action="collapse">Collapse/u);
   monitor.clickDepth("arguments");
-  assert.equal(monitor.run("window.depth"), Infinity);
+  assert.equal(monitor.run("treeDepth('arguments')"), 3);
   assert.equal(monitor.following(), false);
-  assert.match(monitor.elements.get("detail").innerHTML, /data-depth-block="arguments">Collapse/u);
-  assert.match(monitor.elements.get("detail").innerHTML, /section-collapsible fully-expanded/u);
-  monitor.clickDepth("arguments");
-  assert.equal(monitor.run("window.depth"), 1);
-  assert.match(monitor.elements.get("detail").innerHTML, /data-depth-block="arguments">Expand deeper/u);
+  assert.match(monitor.elements.get("detail").innerHTML, /data-depth-block="arguments" data-depth-action="collapse">Collapse/u);
+  assert.match(monitor.elements.get("detail").innerHTML, /data-depth-block="arguments" data-depth-action="expand">Expand/u);
   assert.doesNotMatch(monitor.elements.get("detail").innerHTML, /section-collapsible fully-expanded/u);
+  monitor.clickDepth("arguments");
+  assert.equal(monitor.run("treeDepth('arguments')"), 2);
+  monitor.clickDepth("arguments");
+  assert.equal(monitor.run("treeDepth('arguments')"), 1);
+  monitor.clickDepth("arguments");
+  assert.equal(monitor.run("treeDepth('arguments')"), 0);
+  assert.doesNotMatch(monitor.elements.get("detail").innerHTML, /data-depth-block="arguments" data-depth-action="collapse"/u);
+  assert.match(monitor.elements.get("detail").innerHTML, /data-depth-block="arguments" data-depth-action="expand">Expand/u);
+  monitor.clickDepth("arguments","expand");
+  assert.equal(monitor.run("treeDepth('arguments')"), Infinity);
+  assert.match(monitor.elements.get("detail").innerHTML, /data-depth-block="arguments" data-depth-action="collapse">Collapse/u);
+  assert.match(monitor.elements.get("detail").innerHTML, /section-collapsible fully-expanded/u);
   monitor.call(2);
   assert.equal(monitor.selected(), 1);
-  assert.equal(monitor.run("treeDepth('arguments')"), 1);
+  assert.equal(monitor.run("treeDepth('arguments')"), Infinity);
   monitor.clickCall(2);
-  assert.equal(monitor.run("treeDepth('arguments')"), 2);
+  assert.equal(monitor.run("treeDepth('arguments')"), Infinity);
+});
+
+test("Output also starts fully expanded and collapses independently of Arguments", () => {
+  const monitor=setupMonitor();
+  monitor.run('apply({id:15,tool:"test_tool",status:"success",sessionId:"session-a",arguments:{nested:{alpha:1}},output:{result:{deep:{message:"done"}}},startedAt:"2026-11-11T03:00:00Z"})');
+  assert.equal(monitor.run("treeDepth('arguments')"),Infinity);
+  assert.equal(monitor.run("treeDepth('output')"),Infinity);
+  assert.match(monitor.elements.get("detail").innerHTML,/data-depth-block="output" data-depth-action="collapse">Collapse/u);
+  monitor.clickDepth("output");
+  assert.equal(monitor.run("treeDepth('output')"),2);
+  assert.equal(monitor.run("treeDepth('arguments')"),Infinity);
+  assert.match(monitor.elements.get("detail").innerHTML,/data-depth-block="output" data-depth-action="collapse">Collapse/u);
+  assert.match(monitor.elements.get("detail").innerHTML,/data-depth-block="output" data-depth-action="expand">Expand/u);
+  monitor.clickDepth("output","expand");
+  assert.equal(monitor.run("treeDepth('output')"),Infinity);
+  assert.match(monitor.elements.get("detail").innerHTML,/data-depth-block="output" data-depth-action="collapse">Collapse/u);
+});
+
+test("previous saved depth settings do not override the new fully expanded default", () => {
+  const storage=new Map();
+  storage.set("openclaw.monitor.view.v1",JSON.stringify({followLatest:false,selectedEvent:10,followSessionId:"agent-a",blockDepths:{"10:arguments":1,"10:output":2}}));
+  const monitor=setupMonitor(storage);
+  monitor.run('apply({id:10,tool:"test_tool",status:"success",sessionId:"agent-a",arguments:{nested:{value:1}},output:{nested:{value:2}},startedAt:"2026-11-11T03:00:00Z"})');
+  assert.equal(monitor.selected(),10);
+  assert.equal(monitor.following(),false);
+  assert.equal(monitor.run("treeDepth('arguments')"),Infinity);
+  assert.equal(monitor.run("treeDepth('output')"),Infinity);
+  assert.match(monitor.elements.get("detail").innerHTML,/data-depth-block="arguments" data-depth-action="collapse">Collapse/u);
+  assert.match(monitor.elements.get("detail").innerHTML,/data-depth-block="output" data-depth-action="collapse">Collapse/u);
+  assert.equal(JSON.parse(storage.get("openclaw.monitor.view.v1")).treeDepthVersion,3);
 });
 
 test("manually opening the JSON tree keeps the selected call stable during new events", () => {
@@ -245,7 +287,7 @@ test("manually opening the JSON tree keeps the selected call stable during new e
   monitor.call(2, "running", "session-a");
   assert.equal(monitor.selected(), 1);
   assert.equal(monitor.following(), false);
-  assert.equal(monitor.run("treeDepth('arguments')"), Infinity);
+  assert.equal(monitor.run("treeDepth('arguments')"), 1);
   monitor.elements.get("followLatest").onclick();
   assert.equal(monitor.selected(), 2);
 });
@@ -258,14 +300,14 @@ test("a monitor reconnect preserves manual JSON expansion and paused following",
   const saved=JSON.parse(storage.get("openclaw.monitor.view.v1"));
   assert.equal(saved.followLatest,false);
   assert.equal(saved.selectedEvent,1);
-  assert.equal(saved.blockDepths["1:arguments"],"all");
+  assert.equal(saved.blockDepths["1:arguments"],2);
 
   const restored=setupMonitor(storage);
   restored.run('apply({id:1,tool:"test_tool",status:"success",sessionId:"agent-a",arguments:{nested:{deep:{value:1}}},startedAt:"2026-11-11T03:00:00Z"})');
   assert.equal(restored.selected(),1);
   assert.equal(restored.following(),false);
-  assert.equal(restored.run("treeDepth('arguments')"),Infinity);
-  assert.match(restored.elements.get("detail").innerHTML,/data-depth-block="arguments">Collapse/u);
+  assert.equal(restored.run("treeDepth('arguments')"),2);
+  assert.match(restored.elements.get("detail").innerHTML,/data-depth-block="arguments" data-depth-action="expand">Expand/u);
   restored.call(2,"running","agent-a");
   assert.equal(restored.selected(),1);
 });
@@ -373,6 +415,7 @@ test("monitor exposes sessions directly and removes the redundant privacy footer
   assert.match(html, /id="detail"/);
   assert.match(html, /id="followLatest"/);
   assert.doesNotMatch(html, /Activity monitor/);
+  assert.doesNotMatch(html, /TOOL MONITOR/);
 });
 
 test("desktop density follows available height, not a monitor resolution", async () => {
@@ -382,4 +425,19 @@ test("desktop density follows available height, not a monitor resolution", async
   assert.match(layout, /height: clamp\(56px, 6\.6dvh, 72px\)/u);
   assert.match(layout, /\.inspector-sticky\s*\{[\s\S]*?padding:\s*clamp\(9px, 1\.3dvh, 17px\)/u);
   assert.doesNotMatch(layout, /@media/u);
+});
+
+test("Arguments displays long values on two lines with a scrollable second line", async () => {
+  const css = await readFile(new URL("../src/monitor/assets/monitor.css", import.meta.url), "utf8");
+  const js = await readFile(new URL("../src/monitor/assets/monitor.js", import.meta.url), "utf8");
+  const argumentsStyles = css.split("/* Each long Argument value uses at most two lines.")[1];
+  assert.ok(argumentsStyles);
+  assert.match(argumentsStyles, /#payload-arguments\s*\{\s*overflow-x:\s*hidden;\s*overflow-wrap:\s*anywhere;/u);
+  assert.match(argumentsStyles, /#payload-arguments \.argument-raw-line\s*\{\s*display:\s*block;/u);
+  assert.match(argumentsStyles, /#payload-arguments \.json-formatter-string/u);
+  assert.match(argumentsStyles, /#payload-arguments \.argument-two-lines > \.argument-remainder\s*\{\s*display:\s*block;[\s\S]*?overflow-x:\s*auto;[\s\S]*?white-space:\s*nowrap;/u);
+  assert.match(js, /function splitArgumentLine\(element\)/u);
+  assert.match(js, /if\(key==="arguments"\)formatArguments\(body\)/u);
+  assert.match(js, /window\.addEventListener\("resize"/u);
+  assert.match(js, /#payload-arguments \.json-formatter-toggler-link/u);
 });

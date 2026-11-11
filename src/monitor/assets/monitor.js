@@ -1,12 +1,34 @@
 const $=id=>document.getElementById(id);
 let events=[],sessions=[],selectedEvent=null,selectedSession="all",source=null,reconnectPending=false,followLatest=true,followSessionId=undefined;
 let blockValues=Object.create(null),blockModes=Object.create(null),blockDepths=Object.create(null),diffModes=Object.create(null),manualDiffModes=Object.create(null);
-const DEFAULT_TREE_DEPTH=2,FULL_TREE_DEPTH=Infinity;
-const treeDepth=key=>blockDepths[selectedEvent+":"+key]??DEFAULT_TREE_DEPTH;
+const COLLAPSED_TREE_DEPTH=0,FULL_TREE_DEPTH=Infinity;
+const treeDepth=key=>blockDepths[selectedEvent+":"+key]??FULL_TREE_DEPTH;
+function maxTreeLevels(value){
+  if(!value||typeof value!=="object")return 0;
+  let max=0,visited=0;
+  const stack=[[value,1]],seen=new WeakSet();
+  while(stack.length&&visited++<50000){
+    const [node,level]=stack.pop();
+    if(seen.has(node))continue;
+    seen.add(node);
+    max=Math.max(max,level);
+    if(level>=128)continue;
+    for(const child of Object.values(node))
+      if(child&&typeof child==="object")stack.push([child,level+1]);
+  }
+  return max;
+}
+function collapseTreeDepth(key){
+  const depth=treeDepth(key);
+  if(depth===FULL_TREE_DEPTH)
+    return Math.max(COLLAPSED_TREE_DEPTH,maxTreeLevels(structuredValue(blockValues[key]))-1);
+  return Math.max(COLLAPSED_TREE_DEPTH,depth-1);
+}
 const collapsedSections=new Set();
 let lastFocusedEvent=null,lastFocusedStatus=null,lastFocusedOutput=null,lastFocusedError=null;
 let lastRenderedCall=null;
 const VIEW_STATE_KEY="openclaw.monitor.view.v1";
+const TREE_DEPTH_VERSION=3;
 function restoreViewState(){
   try{
     const saved=JSON.parse(window.sessionStorage?.getItem(VIEW_STATE_KEY)||"null");
@@ -15,9 +37,12 @@ function restoreViewState(){
     if(typeof saved.selectedSession==="string")selectedSession=saved.selectedSession;
     if(saved.selectedEvent===null||Number.isSafeInteger(saved.selectedEvent))selectedEvent=saved.selectedEvent;
     if(Object.hasOwn(saved,"followSessionId")&&(saved.followSessionId===null||typeof saved.followSessionId==="string"))followSessionId=saved.followSessionId;
-    if(saved.blockDepths&&typeof saved.blockDepths==="object"&&!Array.isArray(saved.blockDepths))
+    if((saved.treeDepthVersion===TREE_DEPTH_VERSION||saved.treeDepthVersion===2)&&saved.blockDepths&&typeof saved.blockDepths==="object"&&!Array.isArray(saved.blockDepths))
       for(const [key,value] of Object.entries(saved.blockDepths))
-        if(value==="all"||value===1||value===DEFAULT_TREE_DEPTH)blockDepths[key]=value==="all"?FULL_TREE_DEPTH:value;
+        if(value==="all")blockDepths[key]=FULL_TREE_DEPTH;
+        else if(saved.treeDepthVersion===2&&value===1)blockDepths[key]=COLLAPSED_TREE_DEPTH;
+        else if(Number.isInteger(value)&&value>=0&&value<=128)
+          blockDepths[key]=saved.treeDepthVersion===2&&value===2?FULL_TREE_DEPTH:value;
     if(Array.isArray(saved.collapsedSections))
       for(const key of saved.collapsedSections)if(typeof key==="string")collapsedSections.add(key);
   }catch{}
@@ -25,7 +50,7 @@ function restoreViewState(){
 function saveViewState(){
   try{
     const depths=Object.fromEntries(Object.entries(blockDepths).map(([key,value])=>[key,value===FULL_TREE_DEPTH?"all":value]));
-    window.sessionStorage?.setItem(VIEW_STATE_KEY,JSON.stringify({followLatest,followSessionId,selectedEvent,selectedSession,blockDepths:depths,collapsedSections:[...collapsedSections]}));
+    window.sessionStorage?.setItem(VIEW_STATE_KEY,JSON.stringify({treeDepthVersion:TREE_DEPTH_VERSION,followLatest,followSessionId,selectedEvent,selectedSession,blockDepths:depths,collapsedSections:[...collapsedSections]}));
   }catch{}
 }
 restoreViewState();
@@ -120,7 +145,10 @@ function block(label,key){
   const manualDiff=rawDiffText!==null&&manualDiffModes[selectedEvent]===true;
   const diff=autoDiffText!==null||manualDiff,mode=payloadMode(key,value,structured,diff);
   const viewButton=structured!==null&&!diff?'<button class="action" type="button" data-view-block="'+key+'">'+(mode==="raw"?"Tree view":"Raw text")+'</button>':"";
-  const depthButton=structured!==null&&!diff&&mode!=="raw"?'<button class="action" type="button" data-depth-block="'+key+'">'+(treeDepth(key)===FULL_TREE_DEPTH?"Collapse":"Expand deeper")+'</button>':"";
+  const depthButton=structured!==null&&!diff&&mode!=="raw"
+    ?(treeDepth(key)>COLLAPSED_TREE_DEPTH?'<button class="action" type="button" data-depth-block="'+key+'" data-depth-action="collapse">Collapse</button>':"")
+      +(treeDepth(key)!==FULL_TREE_DEPTH?'<button class="action" type="button" data-depth-block="'+key+'" data-depth-action="expand">Expand</button>':"")
+    :"";
   const diffButton=diff?'<button class="action" type="button" data-diff-mode="'+key+'">'+(mode==="side-by-side"?"Inline":"Side by side")+'</button>':"";
   const manualDiffButton=manualDiff?'<button class="action" type="button" data-raw-output="'+key+'">Raw output</button>':rawDiffText!==null?'<button class="action" type="button" data-open-diff="'+key+'">View diff</button>':"";
   const actions=viewButton+depthButton+diffButton+manualDiffButton;
@@ -128,6 +156,62 @@ function block(label,key){
   const preview=structured&&typeof structured==="object"?(Array.isArray(structured)?structured.length+" items":Object.keys(structured).length+" fields"):"View parameters";
   const open=!collapsedSections.has(selectedEvent+":"+key)?" open":"";
   return '<details class="section section-collapsible'+(treeDepth(key)===FULL_TREE_DEPTH?' fully-expanded':'')+'" data-section-key="'+key+'" data-event-id="'+selectedEvent+'"'+open+'><summary class="section-summary"><span class="label">'+esc(label)+'</span><span class="section-preview">'+esc(preview)+'</span><span class="section-caret" aria-hidden="true">⌄</span></summary><div class="section-inner"><div class="block-head"><div class="block-actions">'+actions+'</div></div><div class="payload-body" id="payload-'+key+'"></div></div></details>';
+}
+const argumentOriginalText=new WeakMap();
+function splitArgumentLine(element){
+  const textNode=element.firstChild;
+  if(!textNode||textNode.nodeType!==3||textNode.textContent.length<60||typeof document.createRange!=="function")return;
+  const text=textNode.textContent,range=document.createRange();
+  range.setStart(textNode,0);
+  let low=1,high=text.length;
+  while(low<high){
+    const mid=Math.ceil((low+high)/2);
+    range.setEnd(textNode,mid);
+    if(range.getClientRects().length<=1)low=mid;
+    else high=mid-1;
+  }
+  if(low>=text.length)return;
+  let cut=low;
+  if(cut>0&&cut<text.length){
+    const before=text.charCodeAt(cut-1),after=text.charCodeAt(cut);
+    if(before>=0xD800&&before<=0xDBFF&&after>=0xDC00&&after<=0xDFFF)cut--;
+  }
+  const space=text.lastIndexOf(" ",cut);
+  if(space>cut-24&&space>0)cut=space+1;
+  if(cut<1)return;
+  argumentOriginalText.set(element,text);
+  const first=document.createElement("span"),second=document.createElement("span");
+  first.textContent=text.slice(0,cut);
+  second.className="argument-remainder";
+  second.textContent=text.slice(cut);
+  element.classList.add("argument-two-lines");
+  element.replaceChildren(first,second);
+}
+function formatArguments(body){
+  if(typeof document.createRange!=="function")return;
+  const pre=body.querySelector("pre");
+  if(pre&&!pre.classList.contains("argument-raw-lines")){
+    const lines=pre.textContent.split(/\r?\n/),fragment=document.createDocumentFragment();
+    for(const line of lines){
+      const entry=document.createElement("span");
+      entry.className="argument-raw-line";
+      entry.textContent=line||" ";
+      fragment.appendChild(entry);
+    }
+    pre.classList.add("argument-raw-lines");
+    pre.replaceChildren(fragment);
+  }
+  body.querySelectorAll(".json-formatter-string, .argument-raw-line").forEach(splitArgumentLine);
+}
+function reflowArguments(){
+  const body=$("payload-arguments");if(!body)return;
+  body.querySelectorAll(".argument-two-lines").forEach(element=>{
+    const original=argumentOriginalText.get(element);
+    if(original===undefined)return;
+    element.classList.remove("argument-two-lines");
+    element.textContent=original;
+  });
+  formatArguments(body);
 }
 function renderBlock(key){
   const body=$("payload-"+key);if(!body)return;
@@ -142,9 +226,11 @@ function renderBlock(key){
   if(structured!==null&&mode!=="raw"&&typeof window.JSONFormatter==="function"){
     const formatter=new window.JSONFormatter(structured,treeDepth(key),{theme:"light",hoverPreviewEnabled:true,hoverPreviewArrayCount:10,hoverPreviewFieldCount:4,animateOpen:false,maxArrayItems:10000,exposePath:true});
     body.appendChild(formatter.render());
+    if(key==="arguments")formatArguments(body);
     return;
   }
   const pre=document.createElement("pre");pre.textContent=rawValue(value);body.appendChild(pre);
+  if(key==="arguments")formatArguments(body);
 }
 async function copyWithFeedback(button,text){
   const previousTitle=button.title;
@@ -324,7 +410,7 @@ function renderDetail(){
   document.querySelectorAll("[data-depth-block]").forEach(button=>button.onclick=()=>{
     pauseFollowForInspection();
     const key=button.dataset.depthBlock;
-    blockDepths[selectedEvent+":"+key]=treeDepth(key)===FULL_TREE_DEPTH?1:FULL_TREE_DEPTH;
+    blockDepths[selectedEvent+":"+key]=button.dataset.depthAction==="expand"?FULL_TREE_DEPTH:collapseTreeDepth(key);
     saveViewState();
     renderDetail();
   });
@@ -438,9 +524,27 @@ const inspectorScroll=document.querySelector("main");
 if(inspectorScroll)inspectorScroll.addEventListener("scroll",()=>{
   document.querySelector(".inspector-sticky")?.classList.toggle("is-scrolled",inspectorScroll.scrollTop>6);
 },{passive:true});
+if(typeof window.addEventListener==="function"){
+  let reflowScheduled=false;
+  window.addEventListener("resize",()=>{
+    if(reflowScheduled)return;
+    reflowScheduled=true;
+    window.requestAnimationFrame(()=>{
+      reflowScheduled=false;
+      reflowArguments();
+    });
+  });
+}
 $("callSearch").addEventListener("input",render);
 $("callSearch").addEventListener("keydown",event=>{
   if(event.key==="Escape"&&$("callSearch").value){$("callSearch").value="";render()}
+});
+document.addEventListener("click",event=>{
+  if(!event.target.closest?.("#payload-arguments .json-formatter-toggler-link"))return;
+  window.requestAnimationFrame(()=>{
+    const body=$("payload-arguments");
+    if(body)formatArguments(body);
+  });
 });
 $("refresh").onclick=load;$("clear").onclick=clearHistory;$("restart").onclick=restartBridge;
 document.addEventListener("keydown",event=>{

@@ -702,3 +702,41 @@ pre, .payload-body pre {
   overflow: auto;
   overscroll-behavior: contain;
 }
+
+/* Each long Argument value uses at most two lines. The remainder can scroll
+   horizontally on its own second line without hiding fields beneath it. */
+#payload-arguments {
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+}
+#payload-arguments pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+#payload-arguments .argument-raw-line {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+#payload-arguments .json-formatter-row,
+#payload-arguments .json-formatter-key,
+#payload-arguments .json-formatter-value,
+#payload-arguments .json-formatter-string,
+#payload-arguments .json-formatter-preview-text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+#payload-arguments .argument-two-lines > .argument-remainder {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+  scrollbar-width: thin;
+}
