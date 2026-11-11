@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-let events=[],sessions=[],selectedEvent=null,selectedSession="all",source=null,reconnectPending=false;
+let events=[],sessions=[],selectedEvent=null,selectedSession="all",source=null,reconnectPending=false,followLatest=true;
 let blockValues=Object.create(null),blockModes=Object.create(null),blockDepths=Object.create(null),diffModes=Object.create(null),manualDiffModes=Object.create(null);
 function fmtTime(v){try{return v?new Date(v).toLocaleTimeString():"-"}catch{return "-"}}
 function pretty(v){return typeof v==="string"?v:JSON.stringify(v,null,2)}
@@ -161,22 +161,39 @@ function matchingEvents(){
     return JSON.stringify(searchable).toLowerCase().includes(query);
   });
 }
+function updateFollowButton(){
+  const button=$("followLatest");
+  button.setAttribute("aria-pressed",String(followLatest));
+  button.textContent=followLatest?"Following latest":"Follow latest";
+  button.title=followLatest?"Automatically showing new tool calls. Select an older call to pause.":"Resume showing new tool calls automatically";
+}
 function render(){
   renderSessions();
   const scoped=scopedEvents();
   const filtered=matchingEvents().filter(e=>$("filter").value==="all"||e.status===$("filter").value);
   const list=[...filtered].sort((a,b)=>b.id-a.id);
-  if(selectedEvent==null||!list.some(e=>e.id===selectedEvent))selectedEvent=list[0]?.id??null;
+  const previousEvent=selectedEvent;
+  if(followLatest||selectedEvent==null||!list.some(e=>e.id===selectedEvent))selectedEvent=list[0]?.id??null;
+  updateFollowButton();
   $("calls").innerHTML=list.length?list.map(e=>'<div class="call '+(e.id===selectedEvent?"selected":"")+'"><button type="button" class="call-open" data-id="'+e.id+'" aria-label="Inspect '+esc(e.tool||"tool call")+' #'+e.id+'"><div class="calltop"><span class="toolname">'+esc(e.tool||"Unknown tool")+'</span><span class="badge '+esc(e.status)+'">'+statusLabel(e.status)+'</span></div><div class="subline">'+esc(e.command||e.method||e.summary||"No command detail")+'</div><div class="meta">'+esc(e.sessionLabel||"Unscoped / local")+' · '+esc(fmtTime(e.startedAt))+' · '+(e.durationMs==null?"in progress":e.durationMs+" ms")+' · #'+e.id+'</div></button><button type="button" class="icon-action call-copy" data-copy-call="'+e.id+'" title="Copy tool call as JSON" aria-label="Copy tool call #'+e.id+'">'+copyIcon()+'</button></div>').join(""):'<div class="empty">No matching tool calls.</div>';
   $("running").textContent=String(scoped.filter(e=>e.status==="running").length);
   $("completed").textContent=String(scoped.filter(e=>e.status==="success").length);
   $("errors").textContent=String(scoped.filter(e=>e.status==="error").length);
-  document.querySelectorAll(".call-open").forEach(b=>b.onclick=()=>{selectedEvent=Number(b.dataset.id);render()});
+  document.querySelectorAll(".call-open").forEach(b=>b.onclick=()=>{
+    const id=Number(b.dataset.id);
+    if(id!==list[0]?.id)followLatest=false;
+    selectedEvent=id;
+    render();
+  });
   document.querySelectorAll("[data-copy-call]").forEach(button=>button.onclick=()=>{
     const event=events.find(item=>item.id===Number(button.dataset.copyCall));
     if(event)void copyWithFeedback(button,JSON.stringify(event,null,2));
   });
   renderDetail();
+  if(followLatest&&selectedEvent!==previousEvent){
+    const main=document.querySelector("main");
+    if(main)main.scrollTop=0;
+  }
 }
 function renderDetail(){
   const e=events.find(x=>x.id===selectedEvent);
@@ -218,7 +235,6 @@ function apply(e){
   if(!e.id)return;
   const i=events.findIndex(x=>x.id===e.id);if(i<0)events.push(e);else events[i]={...events[i],...e};
   events.sort((a,b)=>a.id-b.id);if(events.length>200)events=events.slice(-200);
-  if(selectedEvent==null||!events.some(x=>x.id===selectedEvent))selectedEvent=e.id;
   render();
 }
 async function load(){
@@ -227,7 +243,6 @@ async function load(){
     if(!results[0].ok||!results[1].ok)throw new Error("HTTP "+(!results[0].ok?results[0].status:results[1].status));
     const eventData=await results[0].json(),sessionData=await results[1].json();
     events=eventData.events||[];sessions=sessionData.sessions||[];
-    if(selectedEvent==null&&events.length)selectedEvent=events[events.length-1].id;
     $("dot").classList.add("live");$("connection").textContent="Bridge connected";render();connectEvents();
   }catch(e){$("dot").classList.remove("live");$("connection").textContent="Bridge offline"}
 }
@@ -284,6 +299,7 @@ async function restartBridge(){
   }
 }
 $("filter").onchange=render;
+$("followLatest").onclick=()=>{followLatest=!followLatest;render()};
 $("callSearch").addEventListener("input",render);
 $("callSearch").addEventListener("keydown",event=>{
   if(event.key==="Escape"&&$("callSearch").value){$("callSearch").value="";render()}

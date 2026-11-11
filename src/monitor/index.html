@@ -18,7 +18,7 @@
     <div class="panel-title"><span>ChatGPT Sessions</span></div>
     <div id="sessions" class="tools"></div>
     <div class="separator"></div>
-    <div class="panel-title call-filter-title"><span>Tool calls</span><div class="filters"><input id="callSearch" type="search" placeholder="Search calls…" aria-label="Search tool calls" autocomplete="off"><select id="filter" aria-label="Filter tool call status"><option value="all">All statuses</option><option value="running">Running</option><option value="success">Success</option><option value="error">Error</option></select></div></div>
+    <div class="panel-title call-filter-title"><div class="call-title-row"><span>Tool calls</span><button id="followLatest" type="button" class="action follow-toggle" aria-pressed="true" title="Automatically show each new tool call">Following latest</button></div><div class="filters"><input id="callSearch" type="search" placeholder="Search calls…" aria-label="Search tool calls" autocomplete="off"><select id="filter" aria-label="Filter tool call status"><option value="all">All statuses</option><option value="running">Running</option><option value="success">Success</option><option value="error">Error</option></select></div></div>
     <div id="calls" class="tools"></div>
   </aside>
   <main>
