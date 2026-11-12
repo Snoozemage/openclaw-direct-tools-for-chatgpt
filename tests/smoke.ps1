@@ -44,10 +44,15 @@ try {
 try {
     $listed = Send-Mcp -Id 2 -Method 'tools/list'
     $toolNames = @($listed.result.tools | ForEach-Object { $_.name })
-    $expectedPublicToolNames = @('start_here', 'openclaw_browser', 'openclaw_computer', 'openclaw_image_render', 'openclaw_ls', 'openclaw_read', 'openclaw_edit', 'openclaw_write', 'openclaw_apply_patch', 'openclaw_glob', 'openclaw_grep', 'openclaw_exec', 'openclaw_process', 'openclaw_tool_search', 'openclaw_tool_describe', 'openclaw_dispatch_action')
+    $expectedPublicToolNames = @('start_here', 'openclaw_bridge_restart', 'openclaw_browser', 'openclaw_computer', 'openclaw_image_render', 'openclaw_ls', 'openclaw_read', 'openclaw_edit', 'openclaw_write', 'openclaw_apply_patch', 'openclaw_glob', 'openclaw_grep', 'openclaw_codebase_intelligence', 'openclaw_exec', 'openclaw_process', 'openclaw_tool_search', 'openclaw_tool_describe', 'openclaw_dispatch_action')
     $missingPublicToolNames = @($expectedPublicToolNames | Where-Object { $_ -notin $toolNames })
     $publicToolNamesValid = $toolNames.Count -eq $expectedPublicToolNames.Count -and $missingPublicToolNames.Count -eq 0
-    Assert-Check $publicToolNamesValid 'All sixteen public MCP tools are exposed' ('Missing: ' + ($missingPublicToolNames -join ', '))
+    Assert-Check $publicToolNamesValid 'All eighteen public MCP tools are exposed' ('Missing: ' + ($missingPublicToolNames -join ', '))
+
+    $codebaseDefinition = $listed.result.tools | Where-Object { $_.name -eq 'openclaw_codebase_intelligence' } | Select-Object -First 1
+    $codebaseSchemaValid = $null -ne $codebaseDefinition -and @($codebaseDefinition.inputSchema.properties.action.enum) -contains 'docs' -and @($codebaseDefinition.inputSchema.properties.action.enum) -contains 'architecture' -and @($codebaseDefinition.inputSchema.properties.action.enum) -contains 'impact'
+    $codebaseSchemaValid = $codebaseSchemaValid -and @($codebaseDefinition.inputSchema.properties.operation.enum) -contains 'apply' -and $codebaseDefinition.inputSchema.properties.approved.type -eq 'boolean'
+    Assert-Check $codebaseSchemaValid 'Codebase Intelligence exposes Phase 8 docs approval, graph and impact contract'
 
     $globDefinition = $listed.result.tools | Where-Object { $_.name -eq 'openclaw_glob' } | Select-Object -First 1
     $globSchemaValid = $null -ne $globDefinition -and @($globDefinition.inputSchema.required) -contains 'pattern' -and $globDefinition.annotations.readOnlyHint -eq $true
