@@ -3,7 +3,7 @@ const text = (description, options = {}) => ({ type: "string", description, ...o
 export const codebaseIntelligenceToolDefinition = {
   name: "openclaw_codebase_intelligence",
   title: "Codebase Intelligence",
-  description: "Local-first source intelligence for allowed PHP/C#/TS repositories. One tool: project, index, search, language AST lookup/trace, impact, C1–C4 architecture, compare, match, docs/index|status|search|preview|apply. Obsidian read scope explicit; preview never writes notes; apply requires user approval, fresh source/document hashes and Generated-only destination. Static source evidence is not deployed runtime proof.",
+  description: "Local-first source intelligence for PHP/C#/TS Git repositories. One tool: project, index, search, language AST lookup/trace, impact, C1–C4 architecture, compare, match, docs/index|status|search|preview|apply. Obsidian read scope stays explicit; preview never writes notes; apply requires user approval, fresh hashes and Generated-only destination. Static source evidence is not deployed runtime proof.",
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   inputSchema: {
     type: "object",
@@ -30,7 +30,7 @@ export const codebaseIntelligenceToolDefinition = {
       name: text("Optional human-readable project name for register, up to 120 characters.", { maxLength: 120 }),
       repositories: {
         type: "array",
-        description: "Required for project/register. Repositories must be exact canonical paths already allowed in the local scope.json. Maximum 12 repositories.",
+        description: "Required for project/register. Absolute local Git repository paths. Maximum 12 repositories per project.",
         minItems: 1,
         maxItems: 12,
         items: {

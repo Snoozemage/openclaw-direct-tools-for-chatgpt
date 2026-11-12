@@ -36,15 +36,13 @@ async function fixture(callback) {
     } catch (error) {
       if (!["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) throw error;
     }
-    const scopePath = path.join(stateRoot, "scope.json");
-    await writeFile(scopePath, JSON.stringify({ version: 1, allowedRoots: [source] }));
-    const registry = createProjectRegistry({ stateRoot, scopePath });
+    const registry = createProjectRegistry({ stateRoot });
     await registry.register({
       projectId: "vaa-test",
       name: "Fixture",
       repositories: [{ id: "pilot", root: source, languages: ["php", "csharp", "typescript", "sql"] }],
     });
-    await callback({ dir, source, other, stateRoot, scopePath, registry });
+    await callback({ dir, source, other, stateRoot, registry });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -157,7 +155,7 @@ test("atomic rollback retains previous revision on forced error", async () => fi
   assert.equal(unreleased.results.length, 0);
 }));
 
-test("search and indexing enforce allowed project roots, caps and reject unknown input", async () => fixture(async ({ registry, scopePath, source }) => {
+test("search and indexing enforce registered project roots, caps and reject unknown input", async () => fixture(async ({ registry, source }) => {
   const engine = createIndexEngine({ registry, limits: { ...INDEX_LIMITS, maxFiles: 2 } });
   const failed = await finish(engine, "vaa-test", "full");
   assert.equal(failed.job.state, "failed");
@@ -166,9 +164,9 @@ test("search and indexing enforce allowed project roots, caps and reject unknown
   await assert.rejects(() => engine.search({ projectId: "vaa-test", query: "course" }), (e) => e.code === "INDEX_MISSING");
   await assert.rejects(() => engine.search({ projectId: "vaa-test", query: "" }), (e) => e.code === "INVALID_ARGUMENTS");
   await assert.rejects(() => engine.search({ projectId: "vaa-test", query: "course", repoIds: ["not-allowed"] }), (e) => e.code === "INVALID_ARGUMENTS");
-  await writeFile(scopePath, JSON.stringify({ version: 1, allowedRoots: [path.dirname(source)] }));
-  await assert.rejects(() => engine.search({ projectId: "vaa-test", query: "course" }), (e) => e.code === "REPO_NOT_ALLOWED");
-  await assert.rejects(() => engine.index({ projectId: "vaa-test" }), (e) => e.code === "REPO_NOT_ALLOWED");
+  await rm(path.join(source, ".git"), { recursive: true, force: true });
+  await assert.rejects(() => engine.search({ projectId: "vaa-test", query: "course" }), (e) => e.code === "PATH_UNAVAILABLE");
+  await assert.rejects(() => engine.index({ projectId: "vaa-test" }), (e) => e.code === "PATH_UNAVAILABLE");
 }));
 
 test("job cancellation retains index revision and concurrent jobs do not overlap", async () => fixture(async ({ registry, source }) => {

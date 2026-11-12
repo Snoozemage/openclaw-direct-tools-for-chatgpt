@@ -19,9 +19,7 @@ async function withProject(cb){
     await cp(path.join(fixtures,"codebase-typescript"),fe,{recursive:true});
     await cp(path.join(fixtures,"codebase-csharp"),be,{recursive:true});
     for(const repo of [fe,be])execFileSync("git",["init","-q",repo],{windowsHide:true,timeout:5000});
-    const scopePath=path.join(stateRoot,"scope.json");
-    await writeFile(scopePath,JSON.stringify({version:1,allowedRoots:[fe,be]}));
-    const registry=createProjectRegistry({stateRoot,scopePath});
+    const registry=createProjectRegistry({stateRoot});
     await registry.register({projectId:"ts-pilot",repositories:[
       {id:"training-ts",root:fe,languages:["typescript"]},
       {id:"training-csharp",root:be,languages:["csharp","sql"]},

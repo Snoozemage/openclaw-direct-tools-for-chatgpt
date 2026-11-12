@@ -26,9 +26,7 @@ async function withProject(callback,{includePhp=false}={}){
       execFileSync("git",["init","-q",php],{windowsHide:true,timeout:5000});
       roots.push(php);repositories.push({id:"legacy-php",root:php,languages:["php","sql"]});
     }
-    const scopePath=path.join(stateRoot,"scope.json");
-    await writeFile(scopePath,JSON.stringify({version:1,allowedRoots:roots}));
-    const registry=createProjectRegistry({stateRoot,scopePath});
+    const registry=createProjectRegistry({stateRoot});
     await registry.register({projectId:"csharp-p4",repositories});
     await callback({temp,csharp,php,registry,stateRoot});
   } finally{await rm(temp,{recursive:true,force:true,maxRetries:8,retryDelay:150});}

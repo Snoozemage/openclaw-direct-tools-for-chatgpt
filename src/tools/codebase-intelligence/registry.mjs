@@ -83,7 +83,7 @@ async function readJsonLimited(filePath, { absent = false } = {}) {
     info = await stat(filePath);
   } catch (error) {
     if (error?.code === "ENOENT" && absent) return null;
-    if (error?.code === "ENOENT") reject("SCOPE_NOT_CONFIGURED", "Scope allowlist file is missing: " + filePath);
+    if (error?.code === "ENOENT") reject("CONFIG_MISSING", "Project registry file is missing: " + filePath);
     throw error;
   }
   if (!info.isFile() || info.size > MAX_CONFIG_BYTES) {
@@ -116,10 +116,9 @@ async function canonicalDirectory(value) {
   }
 }
 
-export function createProjectRegistry({ stateRoot, scopePath } = {}) {
-  if (typeof stateRoot !== "string" || !path.isAbsolute(stateRoot)
-      || typeof scopePath !== "string" || !path.isAbsolute(scopePath)) {
-    throw new TypeError("stateRoot and scopePath must be absolute local paths.");
+export function createProjectRegistry({ stateRoot } = {}) {
+  if (typeof stateRoot !== "string" || !path.isAbsolute(stateRoot)) {
+    throw new TypeError("stateRoot must be an absolute local path.");
   }
 
   const registryPath = path.join(stateRoot, "projects.json");
@@ -130,27 +129,9 @@ export function createProjectRegistry({ stateRoot, scopePath } = {}) {
     return next;
   }
 
-  async function getAllowlist() {
-    const config = await readJsonLimited(scopePath);
-    if (config.version !== 1 || !Array.isArray(config.allowedRoots)
-        || config.allowedRoots.length === 0 || config.allowedRoots.length > 30
-        || config.allowedRoots.some((root) => typeof root !== "string"
-          || !path.isAbsolute(root) || root.length > MAX_ROOT_LENGTH)) {
-      reject("INVALID_CONFIG", "scope.json requires version=1 and 1–30 absolute allowedRoots.");
-    }
-
-    const roots = new Set();
-    for (const root of config.allowedRoots) {
-      roots.add(pathKey(await canonicalDirectory(root)));
-    }
-    return roots;
-  }
-
-  async function ensureAllowedRepository(root, allowed) {
+  // Validate canonical Git roots on registration and access.
+  async function ensureAllowedRepository(root) {
     const actualRoot = await canonicalDirectory(root);
-    if (!allowed.has(pathKey(actualRoot))) {
-      reject("REPO_NOT_ALLOWED", "Repository root is not in the explicit local scope allowlist.");
-    }
     const gitMarker = path.join(actualRoot, ".git");
     try {
       const gitInfo = await lstat(gitMarker);
@@ -200,12 +181,11 @@ export function createProjectRegistry({ stateRoot, scopePath } = {}) {
   async function register(input) {
     validateProjectRegistration(input);
     return serialize(async () => {
-      const allowed = await getAllowlist();
       const canonicalRepos = [];
       for (const repo of input.repositories) {
         canonicalRepos.push({
           id: repo.id,
-          root: await ensureAllowedRepository(repo.root, allowed),
+          root: await ensureAllowedRepository(repo.root),
           languages: [...repo.languages],
         });
       }
@@ -253,21 +233,19 @@ export function createProjectRegistry({ stateRoot, scopePath } = {}) {
 
   async function ensureProjectAllowed(projectId) {
     const project = await show(projectId);
-    const allowed = await getAllowlist();
     const repositories = [];
     for (const repo of project.repositories) {
-      repositories.push({ ...repo, root: await ensureAllowedRepository(repo.root, allowed) });
+      repositories.push({ ...repo, root: await ensureAllowedRepository(repo.root) });
     }
     return { ...project, repositories };
   }
 
   async function status(projectId) {
     const project = await show(projectId);
-    const allowed = await getAllowlist();
     const unavailable = [];
     for (const repo of project.repositories) {
       try {
-        await ensureAllowedRepository(repo.root, allowed);
+        await ensureAllowedRepository(repo.root);
       } catch {
         unavailable.push(repo.id);
       }
@@ -285,5 +263,5 @@ export function createProjectRegistry({ stateRoot, scopePath } = {}) {
     };
   }
 
-  return { register, list, show, status, ensureProjectAllowed, stateRoot, scopePath, registryPath };
+  return { register, list, show, status, ensureProjectAllowed, stateRoot, registryPath };
 }

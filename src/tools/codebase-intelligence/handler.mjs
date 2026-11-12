@@ -32,10 +32,7 @@ function checkFields(args, allowed) {
 }
 
 export function createCodebaseIntelligenceHandler({
-  registry = createProjectRegistry({
-    stateRoot: storageRoot,
-    scopePath: path.join(storageRoot, "scope.json"),
-  }),
+  registry = createProjectRegistry({ stateRoot: storageRoot }),
   engine,
   docs,
 } = {}) {

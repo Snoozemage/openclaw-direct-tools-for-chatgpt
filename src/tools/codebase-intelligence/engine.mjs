@@ -226,10 +226,10 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
         reject("INDEX_LIMIT_EXCEEDED", "The resulting local index exceeds configured limits.");
       }
       if (job.controller.signal.aborted) reject("INDEX_CANCELLED", "Indexing was cancelled.");
-      // Recheck revocation before publication; registration alone is not perpetual read authorization.
+      // Revalidate registered Git roots before publishing an index revision.
       const stillAllowed = await registry.ensureProjectAllowed(job.projectId);
       if (JSON.stringify(stillAllowed.repositories) !== JSON.stringify(project.repositories)) {
-        reject("REPO_NOT_ALLOWED", "Project scope changed during indexing.");
+        reject("INDEX_SOURCE_CHANGED", "Registered repository paths changed during indexing.");
       }
       const latestSnapshots = await snapshotRepositories(project, job.controller.signal);
       if (JSON.stringify(latestSnapshots) !== JSON.stringify(inventory.repoSnapshots)) {

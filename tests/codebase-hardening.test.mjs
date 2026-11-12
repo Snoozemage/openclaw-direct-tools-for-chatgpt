@@ -26,9 +26,7 @@ async function withRepo(cb,{php=true,csharp=true,typescript=true}={}){
       execFileSync("git",["init","-q",root],{timeout:5000,windowsHide:true});
       repositories.push({id,root,languages:[lang]});roots.set(id,root);
     }
-    const scopePath=path.join(stateRoot,"scope.json");
-    await writeFile(scopePath,JSON.stringify({version:1,allowedRoots:repositories.map(x=>x.root)}));
-    const registry=createProjectRegistry({stateRoot,scopePath});
+    const registry=createProjectRegistry({stateRoot});
     await registry.register({projectId,repositories});
     const engine=createIndexEngine({registry});
     async function index(mode="incremental",instance=engine){

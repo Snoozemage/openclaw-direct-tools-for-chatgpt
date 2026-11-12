@@ -22,7 +22,6 @@ The following files live outside the Git repository:
 
 ```text
 %OPENCLAW_STATE_DIR%/codebase-intelligence/
-  scope.json
   projects.json
   index/
     <projectId>.sqlite
@@ -39,22 +38,9 @@ The following files live outside the Git repository:
 
 `OPENCLAW_STATE_DIR` is the OpenClaw runtime state directory (commonly `%LOCALAPPDATA%/OpenClawBeta/state` on the tested Windows setup). The index persists between bridge restarts, but **in-memory job progress does not**. An interrupted SQLite transaction rolls back to the last committed revision.
 
-**Create an explicit allowlist** before registering or indexing:
+Register repositories using absolute Git-root paths. Each access validates the registered paths; `status` reports missing or inaccessible repositories.
 
-```json
-{
-  "version": 1,
-  "allowedRoots": [
-    "C:/Repo/VAA/legacy-php",
-    "C:/Repo/VAA/training-backend",
-    "C:/Repo/VAA/training-frontend"
-  ]
-}
-```
-
-Only exact canonical Git roots are accepted; subdirectories or symlink/junction escapes are not implicitly allowed. Every index/search re-checks registration and allowed roots, and indexing re-checks scope before commit. `status` still reports unavailable roots from saved registrations.
-
-Registration (example names/roots, substitute your actual allowlisted paths):
+Registration (example names/roots, substitute your paths):
 
 ```json
 {
@@ -88,7 +74,7 @@ cd src\tools\codebase-intelligence\csharp-helper
 dotnet build CodebaseRoslyn.csproj -c Release --ignore-failed-sources
 ```
 
-`bin/` and `obj/` are ignored by Git. The bridge invokes only `CodebaseRoslyn.dll` from its local helper, feeding allowlisted source over UTF-8 stdin. It **does not execute C# from the scanned repositories** and does not load or build their solution. If the helper DLL is absent, indexing fails with `ROSLYN_UNAVAILABLE` rather than falling back to regex.
+`bin/` and `obj/` are ignored by Git. The bridge invokes only `CodebaseRoslyn.dll` from its local helper, feeding indexed source over UTF-8 stdin. It **does not execute C# from the scanned repositories** and does not load or build their solution. If the helper DLL is absent, indexing fails with `ROSLYN_UNAVAILABLE` rather than falling back to regex.
 
 A `CSharpCompilation` is created for a bounded source batch and exposes Roslyn `SemanticModel.GetDeclaredSymbol` for locally declared symbols. It is **not a full reference-resolved compilation of the VAA solution**. Unresolved MediatR, DI and EF relationships remain candidates.
 
@@ -101,7 +87,7 @@ cd src\tools\codebase-intelligence\typescript-helper
 npm ci --ignore-scripts --no-audit --no-fund
 ```
 
-`node_modules/` is ignored by Git. Only the TypeScript Compiler API (`createSourceFile` and static AST visitors) reads allowlisted `.ts`/`.tsx` text; the scanned project scripts are never executed or imported. `tsconfig.json` is parsed statically to discover verified `@/*` path mappings. Missing/mismatched compiler reports `TYPESCRIPT_UNAVAILABLE`, not fallback regex. The stored AST excludes HTTP query strings and credentials from normalized request paths; literal URL origins are sanitized.
+`node_modules/` is ignored by Git. Only the TypeScript Compiler API (`createSourceFile` and static AST visitors) reads indexed `.ts`/`.tsx` text; the scanned project scripts are never executed or imported. `tsconfig.json` is parsed statically to discover verified `@/*` path mappings. Missing/mismatched compiler reports `TYPESCRIPT_UNAVAILABLE`, not fallback regex. The stored AST excludes HTTP query strings and credentials from normalized request paths; literal URL origins are sanitized.
 
 ## MCP actions
 
@@ -109,7 +95,7 @@ All examples invoke the same tool name `openclaw_codebase_intelligence`.
 
 | Action | Arguments | Behavior |
 | --- | --- | --- |
-| `project` | `operation: register/list/show`, project fields | Manage allowlisted registry |
+| `project` | `operation: register/list/show`, project fields | Manage registered Git repositories |
 | `index` | `projectId`, `mode: full/incremental` | Queue local index job, return job ID immediately |
 | `index` | `projectId`, `mode: cancel`, optional `jobId` | Request cancellation of active project job |
 | `status` | `projectId`, optional `jobId` | Last committed revision and in-memory job progress/state |
@@ -233,7 +219,7 @@ Audit active mock selection and possible HTTP contract matches against C# (never
 
 ### Optional manually curated C1 context
 
-Only if an operator explicitly creates `%OPENCLAW_STATE_DIR%/codebase-intelligence/contexts/<projectId>.json`, C1 may include additional actors and external systems. This file is **read only** for the tool; P6 never creates or edits it, and no note content is written to Obsidian. Format (placeholder references must be replaced with actual allowlisted indexed source evidence):
+Only if an operator explicitly creates `%OPENCLAW_STATE_DIR%/codebase-intelligence/contexts/<projectId>.json`, C1 may include additional actors and external systems. This file is **read only** for the tool; P6 never creates or edits it, and no note content is written to Obsidian. Format (placeholder references must be replaced with actual indexed source evidence):
 
 ```json
 {
@@ -249,7 +235,7 @@ Only if an operator explicitly creates `%OPENCLAW_STATE_DIR%/codebase-intelligen
 }
 ```
 
-External candidates or relationships are **omitted** unless the specified file appears in the allowlisted index, its current content hash matches the index, and the selected line contains the exact configured source identifier. Actors remain manually curated and unverified. Even a valid identifier is only code-reference evidence: it does **not** establish business identity, live network calls, or a deployed external system. Without a curated context, C1 deliberately displays the registered system scope alone, with missing-evidence explanations.
+External candidates or relationships are **omitted** unless the specified file appears in the index, its current content hash matches the index, and the selected line contains the exact configured source identifier. Actors remain manually curated and unverified. Even a valid identifier is only code-reference evidence: it does **not** establish business identity, live network calls, or a deployed external system. Without a curated context, C1 deliberately displays the registered system scope alone, with missing-evidence explanations.
 
 All graph/projection actions are bounded (max depth 8, nodes 8–120, capped edges) and **read only**; no auto-index, code evaluation, remote requests, git changes or Obsidian writes occur. A stale source file is removed from the active visualization and reported separately. The indexed source snapshot may not represent a currently deployed branch.
 

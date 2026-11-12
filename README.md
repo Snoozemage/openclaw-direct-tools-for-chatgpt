@@ -37,7 +37,7 @@ Rather than routing every operation through the OpenClaw Main Agent, ChatGPT can
 | Screenshot presentation | `openclaw_image_render` | View screenshots of your desktop directly in ChatGPT. |
 | Additional OpenClaw tools | `openclaw_tool_search`, `openclaw_tool_describe`, `openclaw_dispatch_action` | Discover and use other available tools in your OpenClaw setup. |
 
-See [Browser capabilities](docs/BROWSER_CAPABILITIES.md) for browser actions and feedback controls, [Desktop visual feedback](docs/CUA_CURSOR_EFFECTS.md) for Windows cursor and screen-border setup, and [Codebase Intelligence](docs/CODEBASE_INTELLIGENCE.md) for allowlisted source and Obsidian folders, language AST parsing, C1–C4 graphs, impact analysis, docs/search, preview and approved Generated-only apply.
+See [Browser capabilities](docs/BROWSER_CAPABILITIES.md) for browser actions and feedback controls, [Desktop visual feedback](docs/CUA_CURSOR_EFFECTS.md) for Windows cursor and screen-border setup, and [Codebase Intelligence](docs/CODEBASE_INTELLIGENCE.md) for registered source repositories and Obsidian folders, language AST parsing, C1–C4 graphs, impact analysis, docs/search, preview and approved Generated-only apply.
 
 Tool availability depends on the OpenClaw runtime version, installed plugins, paired devices, Gateway policy, and operating-system permissions.
 
@@ -90,7 +90,7 @@ Tool definitions are assembled in `src/mcp/tool-definitions.mjs`; `src/mcp/tool-
 ### Integration boundaries
 
 - **OpenClaw wrappers:** Browser, Computer, Files, and runtime execution/process tools use OpenClaw's native behavior for the operation they wrap. The bridge may shape the public schema, prepare arguments, maintain interaction state, or format results, but it does not bypass OpenClaw policy.
-- **Bridge-native utilities:** `openclaw_glob` and `openclaw_grep` search local files; `openclaw_codebase_intelligence` manages an allowlisted project registry and local incremental FTS5 index; `openclaw_image_render` presents a screenshot captured by the computer tool; `start_here` supplies conversation-specific routing instructions.
+- **Bridge-native utilities:** `openclaw_glob` and `openclaw_grep` search local files; `openclaw_codebase_intelligence` manages registered Git repositories and a local incremental FTS5 index; `openclaw_image_render` presents a screenshot captured by the computer tool; `start_here` supplies conversation-specific routing instructions.
 - **Dynamic tool discovery:** the discovery trio searches tools effectively available to the configured OpenClaw agent, returns runtime-provided schemas, and dispatches the exact selected tool through the supported Gateway invocation path. Tools already covered by direct wrappers are intentionally excluded so their bridge-specific behavior is retained.
 
 For implementation guidance, see [Tool Exposure Guide](docs/TOOL_EXPOSURE_GUIDE.md). For node command policy and discovery of capabilities such as camera, location, screen, device information, notifications, and plugin-provided actions, see [Gateway Node Command Reference](docs/GATEWAY_NODE_COMMAND_REFERENCE.md).

@@ -10,7 +10,7 @@ import { toolDefinitions } from "../src/mcp/tool-definitions.mjs";
 import { callBridgeTool } from "../src/mcp/tool-dispatcher.mjs";
 import { mcpHandler } from "../src/mcp/sdk-server.mjs";
 
-async function withRegistryFixture(callback, { withScope = true } = {}) {
+async function withRegistryFixture(callback) {
   const dir = await mkdtemp(path.join(os.tmpdir(), "openclaw-intelligence-"));
   try {
     const alpha = path.join(dir, "alpha");
@@ -20,11 +20,9 @@ async function withRegistryFixture(callback, { withScope = true } = {}) {
       await mkdir(path.join(repo, ".git"), { recursive: true });
     }
     const storage = path.join(dir, "storage");
-    const scopePath = path.join(storage, "scope.json");
     await mkdir(storage);
-    if (withScope) await writeFile(scopePath, JSON.stringify({ version: 1, allowedRoots: [alpha, beta] }), "utf8");
-    const registry = createProjectRegistry({ stateRoot: storage, scopePath });
-    await callback({ dir, alpha, beta, blocked, storage, scopePath, registry });
+    const registry = createProjectRegistry({ stateRoot: storage });
+    await callback({ dir, alpha, beta, blocked, storage, registry });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -81,25 +79,19 @@ test("registry register/list/show/status persist and never read or index source"
   assert.equal(saved.projects.length, 1);
 }));
 
-test("scope is mandatory, and exact allowlisted roots are enforced", async () => {
-  await withRegistryFixture(async ({ alpha, registry }) => {
-    await expectCode(() => registry.register(sample("vaa-training", alpha)), "SCOPE_NOT_CONFIGURED");
-  }, { withScope: false });
-
+test("registers canonical Git roots and rejects missing or non-directory paths", async () => {
   await withRegistryFixture(async ({ alpha, beta, blocked, registry }) => {
-    await expectCode(() => registry.register(sample("vaa-training", blocked)), "REPO_NOT_ALLOWED");
+    assert.equal((await registry.register(sample("vaa-blocked", blocked))).created, true);
     const nested = path.join(alpha, "nested");
     await mkdir(path.join(nested, ".git"), { recursive: true });
-    await expectCode(() => registry.register(sample("vaa-training", nested)), "REPO_NOT_ALLOWED");
-    await expectCode(() => registry.register(sample("vaa-training", path.join(beta, "missing"))), "PATH_UNAVAILABLE");
-    await expectCode(() => registry.register(sample("vaa-training", path.join(alpha, "file.txt"))), "PATH_UNAVAILABLE");
-    const ok = await registry.register(sample("vaa-training", alpha));
-    assert.equal(ok.created, true);
-    assert.equal((await registry.list()).length, 1);
+    assert.equal((await registry.register(sample("vaa-nested", nested))).created, true);
+    await expectCode(() => registry.register(sample("vaa-missing", path.join(beta, "missing"))), "PATH_UNAVAILABLE");
+    await expectCode(() => registry.register(sample("vaa-file", path.join(alpha, "file.txt"))), "PATH_UNAVAILABLE");
+    assert.equal((await registry.list()).length, 2);
   });
 });
 
-test("symlink or junction escape cannot register a destination outside the allowlist", async () => withRegistryFixture(async ({ dir, blocked, registry }) => {
+test("symlink or junction registration resolves to a canonical Git root", async () => withRegistryFixture(async ({ dir, blocked, registry }) => {
   const alias = path.join(dir, "alias-of-blocked");
   try {
     await symlink(blocked, alias, process.platform === "win32" ? "junction" : "dir");
@@ -107,28 +99,30 @@ test("symlink or junction escape cannot register a destination outside the allow
     if (["EPERM", "EACCES", "ENOTSUP"].includes(error?.code)) return;
     throw error;
   }
-  await expectCode(() => registry.register(sample("vaa-escape", alias)), "REPO_NOT_ALLOWED");
+  const result = await registry.register(sample("vaa-escape", alias));
+  assert.equal(result.project.repositories[0].root, await realpath(blocked));
 }));
 
-test("invalid scope configuration, missing Git metadata and oversized projects fail closed", async () => withRegistryFixture(async ({ alpha, beta, dir, scopePath, registry }) => {
+test("missing Git metadata, invalid project registry and oversized registration fail closed", async () => withRegistryFixture(async ({ alpha, dir, storage, registry }) => {
   const notGit = path.join(dir, "not-git");
   await mkdir(notGit);
-  await writeFile(scopePath, JSON.stringify({ version: 1, allowedRoots: [alpha, notGit] }));
   await expectCode(() => registry.register(sample("vaa-no-git", notGit)), "PATH_UNAVAILABLE");
-  await writeFile(scopePath, "{ bad-json");
+  const registryPath = path.join(storage, "projects.json");
+  await writeFile(registryPath, "{ bad-json");
   await expectCode(() => registry.register(sample("vaa-invalid", alpha)), "INVALID_CONFIG");
-  await writeFile(scopePath, JSON.stringify({ version: 1, allowedRoots: [alpha, beta] }));
+  await writeFile(registryPath, JSON.stringify({ version: 1, projects: [] }));
   const tooMany = Array.from({ length: 13 }, (_, i) => ({
     id: "repo-" + i, root: alpha, languages: ["php"],
   }));
   await expectCode(() => registry.register(sample("vaa-too-many", alpha, { repositories: tooMany })), "INVALID_ARGUMENTS");
 }));
 
-test("revoked or missing repository scope is reported on status instead of silently used", async () => withRegistryFixture(async ({ alpha, scopePath, registry }) => {
+test("removed Git metadata is reported as an unavailable repository", async () => withRegistryFixture(async ({ alpha, registry }) => {
   await registry.register(sample("vaa-training", alpha));
-  await writeFile(scopePath, JSON.stringify({ version: 1, allowedRoots: [path.dirname(alpha)] }));
+  await rm(path.join(alpha, ".git"), { recursive: true, force: true });
   const status = await registry.status("vaa-training");
   assert.deepEqual(status.repositoriesUnavailable, ["legacy-php"]);
+  await expectCode(() => registry.ensureProjectAllowed("vaa-training"), "PATH_UNAVAILABLE");
 }));
 
 test("registry rejects malicious input, duplicate repos, invalid languages and conflicts", async () => withRegistryFixture(async ({ alpha, beta, registry }) => {

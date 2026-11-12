@@ -20,9 +20,7 @@ async function withProject(callback) {
   try {
     await cp(fixtureRoot,repo,{recursive:true});
     execFileSync("git",["init","-q",repo],{timeout:5000,windowsHide:true});
-    const scopePath=path.join(stateRoot,"scope.json");
-    await writeFile(scopePath,JSON.stringify({version:1,allowedRoots:[repo]}));
-    const registry=createProjectRegistry({stateRoot,scopePath});
+    const registry=createProjectRegistry({stateRoot});
     await registry.register({projectId:"php-pilot",repositories:[
       {id:"legacy-php",root:repo,languages:["php","sql"]},
     ]});

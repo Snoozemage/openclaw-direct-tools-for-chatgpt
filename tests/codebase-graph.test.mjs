@@ -20,9 +20,7 @@ async function withProject(cb){
     await cp(path.join(fixtures,"codebase-typescript"),tsRepo,{recursive:true});
     await cp(path.join(fixtures,"codebase-csharp"),csRepo,{recursive:true});
     for(const p of [tsRepo,csRepo])execFileSync("git",["init","-q",p],{timeout:5000,windowsHide:true});
-    const scopePath=path.join(stateRoot,"scope.json");
-    await writeFile(scopePath,JSON.stringify({version:1,allowedRoots:[tsRepo,csRepo]}));
-    const registry=createProjectRegistry({stateRoot,scopePath});
+    const registry=createProjectRegistry({stateRoot});
     await registry.register({projectId:"graph-p6",name:"Fixture Training",repositories:[
       {id:"training-ts",root:tsRepo,languages:["typescript"]},
       {id:"training-csharp",root:csRepo,languages:["csharp","sql"]},
