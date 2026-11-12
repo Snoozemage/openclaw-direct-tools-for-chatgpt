@@ -10,8 +10,7 @@ import { host, port, gatewayPort } from "./config/runtime.mjs";
 import { monitorEvents, eventClients, clearMonitorEvents, getCurrentToolActivity, publishMonitorSignal } from "./monitor/events.mjs";
 import { clearSessionsFromMonitor, listSessions, removeSessionFromMonitor } from "./mcp/session-registry.mjs";
 import { mcpHandler } from "./mcp/sdk-server.mjs";
-import { disposeConfiguredMcpRuntime, activeConfiguredCuaSessionCount, closeConfiguredCuaSessions } from "./tools/runtime/configured-mcp.mjs";
-import { handleComputerTool } from "./tools/computer/handler.mjs";
+import { disposeConfiguredMcpRuntime } from "./tools/runtime/configured-mcp.mjs";
 import { screenBorder } from "./monitor/screen-border.mjs";
 import { browserCursorPreference } from "./tools/browser/cursor-preference.mjs";
 import { setBrowserCursorEnabled } from "./tools/browser/handler.mjs";
@@ -84,39 +83,6 @@ const httpServer = createServer(async (req, res) => {
   }
   if (req.method === "GET" && pathname === "/api/computer-indicator") {
     sendJson(res, 200, screenBorder.getStatus());
-    return;
-  }
-  if (req.method === "GET" && pathname === "/api/computer-execution") {
-    sendJson(res, 200, {
-      ok: true,
-      activeExecutions: handleComputerTool.activeExecutionCount() + activeConfiguredCuaSessionCount(),
-      borderActive: screenBorder.getStatus().active,
-    });
-    return;
-  }
-  if (req.method === "POST" && pathname === "/api/computer-execution/close") {
-    if (req.socket.remoteAddress !== "127.0.0.1"
-      || req.headers.origin || req.headers["x-openclaw-tray"] !== "1") {
-      sendJson(res, 403, { error: "Only the local tray may close computer executions." });
-      return;
-    }
-    try {
-      const results = await Promise.all([
-        handleComputerTool.closeAllExecutions(),
-        closeConfiguredCuaSessions(),
-      ]);
-      // Clear a stranded border even when the native execution has already gone.
-      screenBorder.clear();
-      const attempted = results.reduce((n, result) => n + result.attempted, 0);
-      const closed = results.reduce((n, result) => n + result.closed, 0);
-      const failed = attempted - closed;
-      sendJson(res, failed ? 502 : 200, {
-        ok: failed === 0, attempted, closed, failed, borderCleared: !screenBorder.getStatus().active,
-      });
-    } catch {
-      screenBorder.clear();
-      sendJson(res, 500, { ok: false, error: "Could not close all computer executions.", borderCleared: true });
-    }
     return;
   }
   if (req.method === "GET" && pathname === "/api/activity") {

@@ -102,27 +102,19 @@ function succeeded(result) {
 }
 export function createCuaBorderLifecycle(indicator) {
   let sequence = 0;
-  const sessions = new Set();
   return {
-    clear: () => { sessions.clear(); indicator.clear("cua:"); },
-    activeSessions: () => [...sessions],
+    clear: () => indicator.clear("cua:"),
     async run(id, args, operation) {
       const action = id.replace(/^cua-driver__/, "");
-      const session = args.session ?? "implicit";
-      const key = "cua:session:" + session;
+      const key = "cua:session:" + (args.session ?? "implicit");
       const pending = "cua:pending:" + (++sequence);
       const track = CUA_OPERATIONS.has(action);
       if (track) indicator.open(pending);
       try {
         const result = await operation();
         if (succeeded(result)) {
-          if (action === "end_session") {
-            sessions.delete(session);
-            indicator.close(key);
-          } else if (track) {
-            sessions.add(session);
-            indicator.open(key);
-          }
+          if (action === "end_session") indicator.close(key);
+          else if (track) indicator.open(key);
         } else indicator.clear("cua:");
         return result;
       } catch (error) {

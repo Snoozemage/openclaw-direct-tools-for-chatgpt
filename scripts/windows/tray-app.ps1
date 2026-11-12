@@ -134,7 +134,6 @@ function Set-TrayState([string]$State, $Components) {
     $script:TunnelItem.Text = 'Secure MCP Tunnel: ' + $(if ($Components.Configured -and $Components.Tunnel) { 'Ready' } elseif ($Components.Configured) { 'Not ready' } else { 'Unknown' })
     $script:RestartItem.Enabled = -not ($null -ne $script:RestartUntil -and (Get-Date) -lt $script:RestartUntil)
     $script:CursorItem.Enabled = $script:BridgeAvailable
-    $script:CloseComputerItem.Enabled = $script:BridgeAvailable
 
     if ($State -ne $script:LastState) {
         Write-TrayLog ('State changed: ' + $State + '; Gateway=' + $Components.Gateway + '; Bridge=' + $Components.Bridge + '; Tunnel=' + $Components.Tunnel)
@@ -268,9 +267,6 @@ $script:OpenMonitorItem = [Windows.Forms.ToolStripMenuItem]::new('Open Monitor')
 $script:CursorItem = [Windows.Forms.ToolStripMenuItem]::new('Show AI Cursor')
 $script:CursorItem.Checked = $true
 $script:CursorItem.Enabled = $false
-$script:CloseComputerItem = [Windows.Forms.ToolStripMenuItem]::new('Close Computer Execution')
-$script:CloseComputerItem.Enabled = $false
-$script:CloseComputerItem.ToolTipText = 'Close tracked Computer and CUA sessions, then clear the purple border.'
 $script:RestartItem = [Windows.Forms.ToolStripMenuItem]::new('Restart Bridge')
 $script:StopServiceItem = [Windows.Forms.ToolStripMenuItem]::new('Stop OpenClaw Direct Tools')
 $script:ExitItem = [Windows.Forms.ToolStripMenuItem]::new('Exit tray app')
@@ -282,7 +278,6 @@ $script:ExitItem = [Windows.Forms.ToolStripMenuItem]::new('Exit tray app')
 [void]$script:ContextMenu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
 [void]$script:ContextMenu.Items.Add($script:OpenMonitorItem)
 [void]$script:ContextMenu.Items.Add($script:CursorItem)
-[void]$script:ContextMenu.Items.Add($script:CloseComputerItem)
 [void]$script:ContextMenu.Items.Add($script:RestartItem)
 [void]$script:ContextMenu.Items.Add($script:StopServiceItem)
 [void]$script:ContextMenu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
@@ -321,33 +316,6 @@ $script:CursorItem.add_Click({
         Write-TrayLog ('Could not change AI cursor visibility: ' + $_.Exception.Message)
     } finally {
         $script:CursorItem.Enabled = $script:BridgeAvailable
-    }
-})
-$script:CloseComputerItem.add_Click({
-    if (-not $script:BridgeAvailable -or $null -eq $script:Cfg) { return }
-    $script:CloseComputerItem.Enabled = $false
-    try {
-        $url = 'http://127.0.0.1:' + [int]$script:Cfg.bridgePort + '/api/computer-execution/close'
-        $response = Invoke-RestMethod -Uri $url -Method Post -Headers @{ 'X-OpenClaw-Tray' = '1' } -TimeoutSec 25 -ErrorAction Stop
-        if (-not $response.ok) { throw 'Bridge could not close all computer executions.' }
-        $message = if ([int]$response.closed -gt 0) {
-            'Closed ' + [int]$response.closed + ' computer execution(s). Purple border cleared.'
-        } else {
-            'No tracked execution remains. Purple border cleared.'
-        }
-        Write-TrayLog $message
-        $script:NotifyIcon.BalloonTipTitle = 'Computer execution'
-        $script:NotifyIcon.BalloonTipText = $message
-        $script:NotifyIcon.BalloonTipIcon = [Windows.Forms.ToolTipIcon]::Info
-        $script:NotifyIcon.ShowBalloonTip(2500)
-    } catch {
-        Write-TrayLog ('Could not close computer execution: ' + $_.Exception.Message)
-        $script:NotifyIcon.BalloonTipTitle = 'Computer execution'
-        $script:NotifyIcon.BalloonTipText = 'Could not confirm the session closed. Check the bridge monitor.'
-        $script:NotifyIcon.BalloonTipIcon = [Windows.Forms.ToolTipIcon]::Warning
-        $script:NotifyIcon.ShowBalloonTip(4000)
-    } finally {
-        $script:CloseComputerItem.Enabled = $script:BridgeAvailable
     }
 })
 $script:RestartItem.add_Click({

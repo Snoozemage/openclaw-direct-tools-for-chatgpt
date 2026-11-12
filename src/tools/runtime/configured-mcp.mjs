@@ -103,24 +103,6 @@ export async function invokeConfiguredMcpTool(id, args = {}) {
   });
 }
 
-export function activeConfiguredCuaSessionCount() {
-  return cuaBorderLifecycle.activeSessions().length;
-}
-
-export async function closeConfiguredCuaSessions() {
-  const sessions = cuaBorderLifecycle.activeSessions();
-  let closed = 0;
-  for (const session of sessions) {
-    try {
-      const result = await invokeConfiguredMcpTool("cua-driver__end_session",
-        session === "implicit" ? {} : { session });
-      if (result.ok && result.output?.isError !== true
-        && result.output?.details?.isError !== true) closed++;
-    } catch { /* retain failed session so a later manual close can retry */ }
-  }
-  return { attempted: sessions.length, closed, failed: sessions.length - closed };
-}
-
 export async function disposeConfiguredMcpRuntime() {
   return serialize(async () => {
     const previous = state;
