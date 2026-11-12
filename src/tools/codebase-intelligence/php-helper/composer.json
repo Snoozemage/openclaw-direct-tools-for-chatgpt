@@ -1,0 +1,14 @@
+{
+  "name": "openclaw/php-codebase-parser",
+  "description": "Standalone static PHP/Laravel AST extractor; never loads target repository autoload or executes target code",
+  "type": "project",
+  "require": {
+    "php": "^8.2",
+    "nikic/php-parser": "5.7.0"
+  },
+  "config": {
+    "allow-plugins": false,
+    "sort-packages": true
+  },
+  "scripts": {}
+}
