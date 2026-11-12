@@ -1,0 +1,58 @@
+const text = (description, options = {}) => ({ type: "string", description, ...options });
+
+export const codebaseIntelligenceToolDefinition = {
+  name: "openclaw_codebase_intelligence",
+  title: "Codebase Intelligence",
+  description: "Local-first source intelligence for allowed PHP/C#/TS repositories. One tool: project, index, search, language AST lookup/trace, impact, C1–C4 architecture, compare, match, docs/index|status|search|preview|apply. Obsidian read scope explicit; preview never writes notes; apply requires user approval, fresh source/document hashes and Generated-only destination. Static source evidence is not deployed runtime proof.",
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: text("Project/source/graph/architecture/docs operations.", { enum: ["project", "index", "status", "search", "php", "csharp", "typescript", "trace", "impact", "architecture", "docs", "compare", "match"] }),
+      operation: text("project: register/list/show; php/csharp/typescript: find; docs: index/status/search/preview/apply.", { enum: ["register", "list", "show", "find", "index", "status", "search", "preview", "apply"] }),
+      mode: text("For action=index: incremental (default), full, or cancel; cancellation accepts optional jobId.", { enum: ["full", "incremental", "cancel"] }),
+      jobId: text("Optional UUID job identifier for status or index/cancel.", { maxLength: 64 }),
+      checkWorktree: {type:"boolean",description:"For status only: compare current repository branch and HEAD against indexed snapshot. Does not check uncommitted file content; use incremental index for dirty tree."},
+      query: text("Source locator or business query, required for search/find/trace/impact/match/C3/C4, optional for C1/C2. Max 240 chars.", { maxLength: 240 }),
+      language: text("For trace: php (default), csharp, typescript, or all for the unified directed evidence graph.", { enum: ["php", "csharp", "typescript", "all"] }),
+      level: text("For architecture: C1 system context, C2 logical container candidates, C3 feature groups or C4 code symbols.", { enum: ["C1", "C2", "C3", "C4"] }),
+      direction: text("For impact/architecture/trace(all): upstream (dependents), downstream (dependencies), or both.", { enum: ["upstream", "downstream", "both"] }),
+      maxNodes: { type: "integer", minimum: 8, maximum: 120, description: "Bounded graph/C4 size (default 65)." },
+      format: text("For architecture: Mermaid flowchart plus structured nodes/edges (only supported output format).", { enum: ["mermaid"] }),
+      previewId: text("For docs/apply: exact short-lived preview ID returned by docs/preview, 40 hex characters.", { minLength: 40, maxLength: 40 }),
+      approved: { type:"boolean", description:"For docs/apply ONLY. Must be true only after the user explicitly approves the exact preview; never infer approval from docs/preview or another action." },
+      maxDepth: { type: "integer", minimum: 1, maximum: 9, description: "Static graph traversal depth; unified/impact/architecture have stricter bound 1–8." },
+      kinds: { type: "array", maxItems: 12, uniqueItems: true, items: { type: "string", maxLength: 40 }, description: "Optional AST fact kinds for php, csharp or typescript." },
+      limit: { type: "integer", minimum: 1, maximum: 30, description: "Maximum distinct files in search results (default 10)." },
+      repoIds: { type: "array", maxItems: 12, uniqueItems: true, items: text("Registered repository ID."), description: "Optional repository filter for search." },
+      languages: { type: "array", maxItems: 5, uniqueItems: true, items: { type: "string", enum: ["php", "csharp", "typescript", "sql", "config"] }, description: "Optional source-language filter for search." },
+      projectId: text("Stable project ID for register/show/status: lowercase letters, digits and hyphens, 2–64 characters.", { minLength: 2, maxLength: 64 }),
+      name: text("Optional human-readable project name for register, up to 120 characters.", { maxLength: 120 }),
+      repositories: {
+        type: "array",
+        description: "Required for project/register. Repositories must be exact canonical paths already allowed in the local scope.json. Maximum 12 repositories.",
+        minItems: 1,
+        maxItems: 12,
+        items: {
+          type: "object",
+          properties: {
+            id: text("Stable repository ID, e.g. legacy-php.", { minLength: 2, maxLength: 64 }),
+            root: text("Absolute local repository root path (not a glob or file).", { maxLength: 1024 }),
+            languages: {
+              type: "array",
+              description: "Supported source language identifiers. SQL may accompany a primary language.",
+              minItems: 1,
+              maxItems: 4,
+              uniqueItems: true,
+              items: { type: "string", enum: ["php", "csharp", "typescript", "sql"] },
+            },
+          },
+          required: ["id", "root", "languages"],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ["action"],
+    additionalProperties: false,
+  },
+};

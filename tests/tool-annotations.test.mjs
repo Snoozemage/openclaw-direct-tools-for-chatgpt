@@ -15,6 +15,7 @@ const expectedAnnotations = {
   openclaw_apply_patch: [false, true, false],
   openclaw_glob: [true, false, false],
   openclaw_grep: [true, false, false],
+  openclaw_codebase_intelligence: [false, false, false],
   openclaw_exec: [false, true, true],
   openclaw_process: [false, true, true],
   openclaw_tool_search: [true, false, true],
