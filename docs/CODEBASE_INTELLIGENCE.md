@@ -106,6 +106,7 @@ All examples invoke the same tool name `openclaw_codebase_intelligence`.
 | `trace` | `projectId`, `query`, optional `language=php|csharp|typescript|all`, `repoIds`, `maxDepth`, `limit`; `direction`, `maxNodes`, `languages` for `all` | Existing language-scoped static trace OR unified directed source graph with stable IDs, SHA provenance, gaps, cycles and caps |
 | `impact` | `projectId`, `query`, optional `direction=upstream|downstream|both`, `maxDepth`, `maxNodes`, `limit`, `repoIds`, `languages` | Direct/indirect static dependencies and potential inferred impacts with source paths and real indexed test filename candidates |
 | `architecture` | `projectId`, `level=C1|C2|C3|C4`, optional `query` (required C3/C4), `format=mermaid`, `maxDepth`, `maxNodes`, `limit`, `repoIds` | Bounded C4-level Mermaid flowchart plus structured nodes/edges, source evidence and explicit missing/deployment data |
+| `brief` | `projectId`, `query`, optional `repoIds`, `languages`, `limit` (1–20), `maxDepth`, `maxNodes` | One read-only evidence package: source snippets and AST graph, C1–C4 candidates, Obsidian note navigation if indexed; no inferred runtime links |
 | `docs` | `operation=index|status|search|preview|apply`, `projectId`, optional `query`/`limit` for search; `query` and optional C3/C4 `level` for preview; `previewId` and explicit `approved=true` for apply | Read scoped Obsidian notes, combine note/source results, generate a reviewed Markdown diff, and publish **only to explicitly selected Generated namespace** after hash checks |
 | `compare` | `projectId`, `query`, optional `limit` | PHP legacy ↔ C# candidates; no inferred equivalence promoted to verified |
 | `match` | `projectId`, `query`, optional `limit` | Active FE mock adapters, static axios/fetch calls and method/path matching C# endpoints; runtime links remain explicitly unverified |
@@ -322,6 +323,18 @@ Cancel:
 ```
 
 `index` reports `queued` / `running` / `completed` / `failed` / `cancelled`. Search uses the last committed revision even while an update is in progress. The `status` revision contains `repoSnapshots` (branch and HEAD at indexing time); `freshness: not_checked_against_worktree` means that the status response alone does **not** prove source is still unchanged. For search results, selected files are re-hashed before a snippet is shown. Changed or unavailable files receive `stale_or_unavailable` with `snippet: null`; run incremental index to update.
+
+## Phase 9 — evidence brief (local pilot)
+
+Use one bounded call instead of separately retrieving a source search, a graph, C1–C4 projections and Obsidian references:
+
+```json
+{"action":"brief","projectId":"vaa-training","query":"thiết bị hỗ trợ giảng dạy","repoIds":["training-ts"],"limit":8}
+```
+
+The response includes `candidates` (current-hash source references, labelled `sourceMatch`), `sourceExcerpts` with indexed path/line/hash, `relatedNotes`, `evidenceGraph` and `architecture.C1/C2/C3/C4` Mermaid. The C3 projector now groups non-Laravel PHP `src/<module>` paths as **logical source component candidates**; class/receiver resolution remains incomplete. No new graph/runtime edges are invented. If a query has no graph roots, a source path from an Obsidian note may be tried as a secondary **navigation candidate**; `graphLocatorOrigin` shows that fallback and does not claim business equivalence. `brief` works with no configured Obsidian scope.
+
+**Local pilot (12 Nov 2026):** the 8 existing VAA Vietnamese exact-file labels reached **6/8 top-5**, compared with the Phase 8 source-only baseline **1/8** and separate Obsidian navigation baseline **5/8**; those are small curated fixed-file recall labels, not semantic precision. On two example workflows, the local handler reduced source/notes/four-view calls from **5→1** and **6→1**, but local single-run elapsed time only improved by **1.29x** and **1.31x** respectively. This does **not** prove a 2x end-to-end LLM speedup. Reproduce with `node scripts/codebase-phase9-pilot.mjs`; source indices and Obsidian remain read-only. Live MCP bridge reload, Git commit/push, and Obsidian generated apply were not performed.
 
 ## Index scope and limits
 

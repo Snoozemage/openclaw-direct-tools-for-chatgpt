@@ -224,6 +224,19 @@ function groupFor(node){
     const ctrl=p.match(/(?:^|\/)Controllers\/([^/]+)\.php$/u);
     if(ctrl)return {key:node.repoId+":controller:"+ctrl[1],title:"Legacy controller "+ctrl[1],type:"controller_source"};
     if(/(?:^|\/)Models?\//u.test(p))return {key:node.repoId+":models",title:"Legacy models",type:"model_source_candidate"};
+    // Non-Laravel PHP applications commonly organize code under src/<module>.
+    // This is a source-path component candidate, never proof of a runtime boundary.
+    const module=p.match(/^src\/([^/]+)\/(?:([^/]+)\/)?[^/]+\.php$/u);
+    if(module){
+      const area=module[1];
+      const subarea=module[2]??"";
+      const name=area+(subarea?" / "+subarea:"");
+      return {key:node.repoId+":php-module:"+name,
+        title:"PHP module "+name,type:"php_namespace_module_candidate"};
+    }
+    const services=p.match(/^(?:app|src)\/(Services|Middleware|Console)\/([^/]+)\.php$/u);
+    if(services)return {key:node.repoId+":php-area:"+services[1],
+      title:"PHP "+services[1],type:"php_source_area_candidate"};
   }
   return {key:node.repoId+":file:"+p,title:"File "+p.split("/").at(-1),type:"unclassified_source"};
 }

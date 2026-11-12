@@ -52,7 +52,7 @@ test("exposes exactly one mixed read/write MCP tool with Phase 1 actions", () =>
   });
   assert.deepEqual(matches[0].inputSchema.required, ["action"]);
   assert.equal(matches[0].inputSchema.additionalProperties, false);
-  assert.deepEqual(matches[0].inputSchema.properties.action.enum, ["project", "index", "status", "search", "php", "csharp", "typescript", "trace", "impact", "architecture", "docs", "compare", "match"]);
+  assert.deepEqual(matches[0].inputSchema.properties.action.enum, ["project", "index", "status", "search", "php", "csharp", "typescript", "trace", "impact", "architecture", "brief", "docs", "compare", "match"]);
   assert.equal(matches[0].inputSchema.properties.repositories.maxItems, 12);
 });
 

@@ -3,17 +3,17 @@ const text = (description, options = {}) => ({ type: "string", description, ...o
 export const codebaseIntelligenceToolDefinition = {
   name: "openclaw_codebase_intelligence",
   title: "Codebase Intelligence",
-  description: "Local-first source intelligence for PHP/C#/TS Git repositories. One tool: project, index, search, language AST lookup/trace, impact, C1–C4 architecture, compare, match, docs/index|status|search|preview|apply. Obsidian read scope stays explicit; preview never writes notes; apply requires user approval, fresh hashes and Generated-only destination. Static source evidence is not deployed runtime proof.",
+  description: "Local-first source intelligence for PHP/C#/TS Git repositories. One tool: project, index, search, language AST lookup/trace, impact, C1–C4 architecture, brief (source evidence + architecture + optional Obsidian navigation), compare, match, docs/index|status|search|preview|apply. Obsidian read scope stays explicit; preview never writes notes; apply requires user approval, fresh hashes and Generated-only destination. Static source evidence is not deployed runtime proof.",
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   inputSchema: {
     type: "object",
     properties: {
-      action: text("Project/source/graph/architecture/docs operations.", { enum: ["project", "index", "status", "search", "php", "csharp", "typescript", "trace", "impact", "architecture", "docs", "compare", "match"] }),
+      action: text("Project/source/graph/architecture/docs operations.", { enum: ["project", "index", "status", "search", "php", "csharp", "typescript", "trace", "impact", "architecture", "brief", "docs", "compare", "match"] }),
       operation: text("project: register/list/show; php/csharp/typescript: find; docs: index/status/search/preview/apply.", { enum: ["register", "list", "show", "find", "index", "status", "search", "preview", "apply"] }),
       mode: text("For action=index: incremental (default), full, or cancel; cancellation accepts optional jobId.", { enum: ["full", "incremental", "cancel"] }),
       jobId: text("Optional UUID job identifier for status or index/cancel.", { maxLength: 64 }),
       checkWorktree: {type:"boolean",description:"For status only: compare current repository branch and HEAD against indexed snapshot. Does not check uncommitted file content; use incremental index for dirty tree."},
-      query: text("Source locator or business query, required for search/find/trace/impact/match/C3/C4, optional for C1/C2. Max 240 chars.", { maxLength: 240 }),
+      query: text("Source locator or business query, required for search/find/trace/impact/brief/match/C3/C4, optional for C1/C2. Max 240 chars.", { maxLength: 240 }),
       language: text("For trace: php (default), csharp, typescript, or all for the unified directed evidence graph.", { enum: ["php", "csharp", "typescript", "all"] }),
       level: text("For architecture: C1 system context, C2 logical container candidates, C3 feature groups or C4 code symbols.", { enum: ["C1", "C2", "C3", "C4"] }),
       direction: text("For impact/architecture/trace(all): upstream (dependents), downstream (dependencies), or both.", { enum: ["upstream", "downstream", "both"] }),

@@ -4,6 +4,7 @@ import { codebaseIntelligenceToolDefinition } from "./schema.mjs";
 import { createProjectRegistry, ProjectRegistryError, validateProjectId } from "./registry.mjs";
 import { createIndexEngine } from "./engine.mjs";
 import { createDocsAdapter } from "./docs-adapter.mjs";
+import { createEvidenceBrief } from "./evidence-brief.mjs";
 
 const name = codebaseIntelligenceToolDefinition.name;
 const storageRoot = path.join(stateDir, "codebase-intelligence");
@@ -38,6 +39,7 @@ export function createCodebaseIntelligenceHandler({
 } = {}) {
   const indexEngine = engine ?? createIndexEngine({ registry });
   const docsAdapter = docs ?? createDocsAdapter({registry,engine:indexEngine});
+  const evidenceBrief=createEvidenceBrief({engine:indexEngine,docs:docsAdapter});
   return async function handleCodebaseIntelligenceTool(toolName, args = {}) {
     if (toolName !== name) return undefined;
 
@@ -159,6 +161,15 @@ export function createCodebaseIntelligenceHandler({
         }) });
       }
 
+      if (args?.action === "brief") {
+        checkFields(args, ["action", "projectId", "query", "repoIds", "languages", "limit", "maxDepth", "maxNodes"]);
+        return success("brief", { brief: await evidenceBrief({
+          projectId:args.projectId,query:args.query,
+          repoIds:args.repoIds??[],languages:args.languages??[],
+          limit:args.limit??8,maxDepth:args.maxDepth??5,maxNodes:args.maxNodes??55,
+        }) });
+      }
+
       if (args?.action === "docs") {
         if (args.operation === "index") {
           checkFields(args, ["action", "operation", "projectId"]);
@@ -203,7 +214,7 @@ export function createCodebaseIntelligenceHandler({
         }) });
       }
 
-      return failure("UNKNOWN_ACTION", "Supported actions: project, index, status, search, php, csharp, typescript, trace, impact, architecture, docs, compare, match.");
+      return failure("UNKNOWN_ACTION", "Supported actions: project, index, status, search, php, csharp, typescript, trace, impact, architecture, brief, docs, compare, match.");
     } catch (error) {
       if (error instanceof ProjectRegistryError) return failure(error.code, error.message);
       return failure("REGISTRY_IO_ERROR", "Unable to access the local project registry.");

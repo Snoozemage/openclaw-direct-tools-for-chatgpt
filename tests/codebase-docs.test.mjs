@@ -95,6 +95,23 @@ test("P7 docs/index and docs/search separate Obsidian claims from fresh indexed 
     x.citingNotes.length===1));
   assert.equal((await docs.status({projectId:id})).notes,2);
 }));
+test("P9 brief integrates indexed Obsidian navigation and C1–C4 without writing notes",async()=>withProject(async({handler,generated})=>{
+  await call(handler,"index");
+  const response=await handler("openclaw_codebase_intelligence",{
+    action:"brief",projectId:id,query:"teaching devices",
+    repoIds:["training-ts"],languages:["typescript"],limit:8,
+  });
+  assert.equal(response.structuredContent.ok,true,JSON.stringify(response.structuredContent));
+  const result=response.structuredContent.brief;
+  assert.equal(result.docsStatus,"available");
+  assert.deepEqual(Object.keys(result.architecture),["C1","C2","C3","C4"]);
+  assert.ok(result.candidates.some(x=>x.relativePath==="src/services/teaching-devices.service.ts"));
+  assert.ok(result.relatedNotes.some(x=>x.relativePath==="Manual/Teaching Devices.md"));
+  assert.ok(result.candidates.every(x=>x.repoId==="training-ts"));
+  assert.ok(result.evidenceGraph.nodes.every(x=>x.freshness==="verified_current_hash"));
+  assert.deepEqual(result.architecture.C2.verifiedRuntimeLinks,[]);
+  await assert.rejects(stat(generated),{code:"ENOENT"});
+}));
 test("P7 stale manual note hides cached content after edits",async()=>withProject(async({docs,note})=>{
   await docs.index({projectId:id});
   await writeFile(note,"# New human note\nContent changed.\n");
