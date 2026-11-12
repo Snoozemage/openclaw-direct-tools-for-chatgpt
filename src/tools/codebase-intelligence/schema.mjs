@@ -24,6 +24,7 @@ export const codebaseIntelligenceToolDefinition = {
       maxDepth: { type: "integer", minimum: 1, maximum: 9, description: "Static graph traversal depth; unified/impact/architecture have stricter bound 1–8." },
       kinds: { type: "array", maxItems: 12, uniqueItems: true, items: { type: "string", maxLength: 40 }, description: "Optional AST fact kinds for php, csharp or typescript." },
       limit: { type: "integer", minimum: 1, maximum: 30, description: "Maximum distinct files in search results (default 10)." },
+      ranking: text("Only for brief: note_first (default, existing behavior) or rrf (experimental reciprocal rank fusion); not a verified relevance score.", { enum: ["note_first","rrf"] }),
       repoIds: { type: "array", maxItems: 12, uniqueItems: true, items: text("Registered repository ID."), description: "Optional repository filter for search." },
       languages: { type: "array", maxItems: 5, uniqueItems: true, items: { type: "string", enum: ["php", "csharp", "typescript", "sql", "config"] }, description: "Optional source-language filter for search." },
       projectId: text("Stable project ID for register/show/status: lowercase letters, digits and hyphens, 2–64 characters.", { minLength: 2, maxLength: 64 }),

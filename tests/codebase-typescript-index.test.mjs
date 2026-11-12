@@ -61,6 +61,29 @@ test("TS AST index v4 records imports/exports/pages, mock adapter and HTTP facts
   assert.ok(route.edges.some(e=>e.kind==="active_mock_binding"));
   assert.ok(!route.nodes.some(n=>n.relativePath==="src/components/ui/button.tsx"),"Feature-focused trace must not traverse unrelated UI imports.");
 }));
+test("TypeChecker import usage creates source-only edge without shadowed call",async()=>withProject(async({registry,fe})=>{
+  const folder=path.join(fe,"src","features");
+  await mkdir(folder,{recursive:true});
+  await writeFile(path.join(folder,"client.ts"),
+    "export const client = { get: () => 1 };\n");
+  await writeFile(path.join(folder,"consumer.ts"),[
+    'import { client as service } from "./client";',
+    'export function run(){ return service.get(); }',
+    'export function shadow(service: any){ return service.get(); }',
+  ].join("\n"));
+  const engine=createIndexEngine({registry});
+  const status=await complete(engine,"full");
+  assert.equal(status.job.state,"completed",JSON.stringify(status.job.error));
+  const graph=await engine.evidenceGraph({projectId:"ts-pilot",query:"src/features/consumer.ts",
+    repoIds:["training-ts"],languages:["typescript"],maxDepth:4,maxNodes:80});
+  assert.ok(graph.nodes.some(x=>x.kind==="import_usage"&&x.name==="service.get"));
+  assert.equal(graph.nodes.filter(x=>x.kind==="import_usage"&&
+    x.relativePath==="src/features/consumer.ts").length,1,
+    "Shadowed parameter must not produce another import usage");
+  assert.ok(graph.edges.some(x=>x.kind==="typechecker_resolved_import_binding"&&
+    x.status==="verified_static"));
+  assert.ok(!graph.edges.some(x=>x.status==="verified_runtime"));
+}));
 test("FE mock adapter audit never claims runtime backend; HTTP route match stays candidate",async()=>withProject(async({registry})=>{
   const engine=createIndexEngine({registry});
   assert.equal((await complete(engine,"full")).job.state,"completed");

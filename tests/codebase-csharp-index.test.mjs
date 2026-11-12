@@ -68,6 +68,22 @@ test("Roslyn index v3 persists C# facts, endpoint metadata, CQRS/DI/EF graph",as
   assert.equal(store.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
   store.close();
 }));
+test("indexed Roslyn method reference follows exact declaration path and signature location",async()=>withProject(async({registry,csharp})=>{
+  await writeFile(path.join(csharp,"Api","DemoWorker.cs"),
+    "namespace Demo; public class Worker { public void Execute() {} }");
+  await writeFile(path.join(csharp,"Api","DemoCaller.cs"),
+    "namespace Demo; public class Caller { public void Run() { new Worker().Execute(); } }");
+  const engine=createIndexEngine({registry});
+  const status=await index(engine,"full");
+  assert.equal(status.job.state,"completed",JSON.stringify(status.job.error));
+  const graph=await engine.evidenceGraph({projectId:"csharp-p4",
+    query:"Demo.Worker@Execute",repoIds:["training-csharp"],
+    languages:["csharp"],direction:"both",maxDepth:4,maxNodes:38});
+  assert.ok(graph.nodes.some(x=>x.name==="Demo.Caller@Run"),JSON.stringify(graph.nodes.map(x=>x.name)));
+  assert.ok(graph.edges.some(x=>x.kind==="references_resolved_method"&&
+    x.status==="verified_static"),JSON.stringify(graph.edges.map(x=>x.kind)));
+  assert.ok(!graph.edges.some(x=>x.status==="verified_runtime"));
+}));
 test("Incremental source deletion and renamed controller make stale facts unusable",async()=>withProject(async({registry,csharp})=>{
   const engine=createIndexEngine({registry});
   assert.equal((await index(engine,"full")).job.state,"completed");

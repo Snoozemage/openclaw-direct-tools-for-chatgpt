@@ -106,6 +106,12 @@ export function rebuildTsEdges(db){
         }
       }else if(r.mode!=="external"&&!r.ambiguous)edge(f,null,"unresolved_local_import","unresolved",d.specifier??f.target);
     }
+    if(f.kind==="import_usage"){
+      edge(m,f,"contains_import_usage","verified_static",f.name);
+      const bound=unique(imports.get(k+"\0"+f.target));
+      edge(f,bound,"typechecker_resolved_import_binding",
+        bound?"verified_static":"unresolved",f.target);
+    }
     if(f.kind==="export_binding"){
       edge(m,f,"declares_export_binding","verified_static",f.name);
       const referenced=d.referenced??f.target;
@@ -155,7 +161,7 @@ export function rebuildTsEdges(db){
   return total;
 }
 const KIND_PRIORITY={next_page:0,next_api_route:1,export_binding:2,http_request:3,service_call:4,
-  http_client:5,import:6,reexport:7,module:8,symbol:9,env_binding:10};
+  http_client:5,import_usage:6,import:7,reexport:8,module:9,symbol:10,env_binding:11};
 export function findTsFacts(db,query,{repoIds=[],kinds=[],limit=10}={}){
   const lower=query.toLocaleLowerCase("vi").trim();
   const terms=[lower,...lower.split(/[\s/\\._-]+/u).filter(x=>x.length>2)].filter(Boolean).slice(0,9);

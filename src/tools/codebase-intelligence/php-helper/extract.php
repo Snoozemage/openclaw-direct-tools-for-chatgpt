@@ -95,6 +95,17 @@ function classValue(?Node $node, string $namespace, array $imports): ?string {
     if ($raw === null) return null;
     return fullName($raw, $namespace, $imports);
 }
+function declaredObjectType(?Node $type, string $namespace, array $imports, string $currentClass): ?string {
+    // Only unambiguous declared object types; skip unions, intersections and
+    // dynamic variable assignments. Types are static candidates, not runtime objects.
+    if ($type instanceof Node\NullableType) $type = $type->type;
+    if (!$type instanceof Name) return null;
+    if ($type instanceof Name\FullyQualified) return $type->toString();
+    $raw = $type->toString();
+    if (in_array(strtolower($raw), ['self', 'static'], true)) return $currentClass;
+    if (in_array(strtolower($raw), ['parent', 'mixed', 'object'], true)) return null;
+    return fullName($raw, $namespace, $imports);
+}
 function walk(Node $node, callable $callback): void {
     $callback($node);
     foreach ($node->getSubNodeNames() as $key) {
@@ -318,10 +329,13 @@ function extractStructure(array $stmts, array &$facts, string $namespace='', arr
         $tableNode = null;
         $fieldNodes = [];
         $attrs = [];
+        $typedProperties = [];
         foreach ($stmt->stmts as $member) {
             if ($member instanceof Stmt\Property) {
                 foreach ($member->props as $prop) {
                     $name = $prop->name->name;
+                    $declaredType = declaredObjectType($member->type, $namespace, $imports, $fqcn);
+                    if ($declaredType !== null) $typedProperties[$name] = $declaredType;
                     if ($name === 'table') {
                         $table = value($prop->default);
                         $tableNode = $prop;
@@ -355,12 +369,18 @@ function extractStructure(array $stmts, array &$facts, string $namespace='', arr
             if (!$member instanceof Stmt\ClassMethod) continue;
             $method = $member->name->name;
             $methodId = $fqcn.'@'.$method;
+            $typedParams = [];
+            foreach ($member->params as $param) {
+                $declaredType = declaredObjectType($param->type, $namespace, $imports, $fqcn);
+                if ($declaredType !== null && $param->var instanceof Expr\Variable &&
+                    is_string($param->var->name)) $typedParams[$param->var->name] = $declaredType;
+            }
             fact($facts,'method',$methodId,$member,[
                 'visibility'=>$member->isPublic() ? 'public' : ($member->isProtected() ? 'protected' : 'private'),
             ],$fqcn);
             if (!$member->stmts) continue;
             $reported = [];
-            foreach ($member->stmts as $bodyNode) walk($bodyNode, function(Node $node) use (&$reported,&$facts,$methodId,$namespace,$imports,$isModel) {
+            foreach ($member->stmts as $bodyNode) walk($bodyNode, function(Node $node) use (&$reported,&$facts,$methodId,$namespace,$imports,$isModel,$fqcn,$typedProperties,$typedParams) {
                 if ($node instanceof Expr\FuncCall && $node->name instanceof Name &&
                     strtolower($node->name->toString()) === 'view') {
                     $viewName = value(arg($node,0));
@@ -373,6 +393,36 @@ function extractStructure(array $stmts, array &$facts, string $namespace='', arr
                 }
                 if ($node instanceof Expr\MethodCall) {
                     $call = strtolower(value($node->name) ?? '');
+                    // Capture only typed-receiver method calls. An expression such
+                    // as $this->ship->thrust() can be linked to a declared class;
+                    // untyped and chained receivers stay unlinked rather than
+                    // being guessed from matching method names.
+                    $invoked = value($node->name);
+                    $receiverType = null;
+                    $receiverEvidence = null;
+                    if ($node->var instanceof Expr\Variable && is_string($node->var->name)) {
+                        $variable = $node->var->name;
+                        $receiverType = $variable === 'this' ? $fqcn : ($typedParams[$variable] ?? null);
+                        $receiverEvidence = $variable === 'this' ? 'this_receiver' : 'typed_parameter';
+                    } elseif ($node->var instanceof Expr\PropertyFetch &&
+                              $node->var->var instanceof Expr\Variable &&
+                              $node->var->var->name === 'this' &&
+                              $node->var->name instanceof Node\Identifier) {
+                        $property = $node->var->name->name;
+                        $receiverType = $typedProperties[$property] ?? null;
+                        $receiverEvidence = 'declared_property_type';
+                    }
+                    if ($invoked !== null && $receiverType !== null) {
+                        $targetMethod = $receiverType.'@'.$invoked;
+                        $key = 'member:'.$node->getStartFilePos().':'.$targetMethod;
+                        if (!isset($reported[$key])) {
+                            $reported[$key] = true;
+                            fact($facts,'member_call',$methodId.' => '.$targetMethod,$node,[
+                                'receiverEvidence'=>$receiverEvidence,
+                                'declaredReceiverType'=>$receiverType,'invokedMethod'=>$invoked,
+                            ],$methodId,$targetMethod,'inferred');
+                        }
+                    }
                     if (in_array($call,['get','first','count','exists','insert','update',
                         'delete','upsert','increment','decrement'],true)) {
                         $directTable = directDbTable($node);

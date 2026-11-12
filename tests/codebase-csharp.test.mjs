@@ -52,6 +52,25 @@ test("Roslyn handles UTF-8 BOM and non-ASCII Unicode source from Windows bridge"
   assert.equal(res[0].parseError,null);
   assert.ok(res[0].facts.some(f=>f.name==="Sample.ỨngDụng.GiảngViên"));
 });
+test("Roslyn resolves exact in-batch method declarations, not similarly named classes",async()=>{
+  const files=[
+    {relativePath:"Demo/Worker.cs",source:"namespace Demo; public class Worker { public void Execute() {} }"},
+    {relativePath:"Demo/FakeWorker.cs",source:"namespace Demo; public class FakeWorker { public void Execute() {} }"},
+    {relativePath:"Demo/Controller.cs",source:
+      "namespace Demo; public class Controller { public void Run() { new Worker().Execute(); } }"},
+  ];
+  const result=await extractCsharpBatch(files);
+  const calls=flat(result).filter(x=>x.kind==="semantic_method_call");
+  assert.equal(calls.length,1,JSON.stringify(calls));
+  assert.equal(calls[0].target,"Demo.Worker@Execute");
+  assert.equal(calls[0].parent,"Demo.Controller@Run");
+  assert.equal(calls[0].status,"verified_static");
+  assert.equal(calls[0].details.declarationPath,"Demo/Worker.cs");
+  assert.equal(calls[0].details.runtimeDispatchVerified,false);
+  const unbound=await extractCsharpBatch(files.slice(2));
+  assert.equal(flat(unbound).filter(x=>x.kind==="semantic_method_call").length,0,
+    "Do not guess source links across files absent from the bounded Roslyn batch");
+});
 test("malformed C# produces explicit syntax error, not fabricated endpoint",async()=>{
   const bad=await extractCsharpBatch([{relativePath:"src/BrokenController.cs",source:"[HttpGet] public class {"}]);
   assert.ok(bad[0].parseError);

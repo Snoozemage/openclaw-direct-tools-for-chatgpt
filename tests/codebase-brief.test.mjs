@@ -58,6 +58,7 @@ test("P9 brief combines Obsidian navigation with evidence and all four C4 views"
     projectId:"term-asteroids",query:"thiết bị hỗ trợ",
   });
   assert.equal(result.docsStatus,"available");
+  assert.equal(result.rankingStrategy,"note_first");
   assert.deepEqual(calls,["thiết bị hỗ trợ","src/Engine/Mover.php"]);
   assert.equal(result.graphLocatorOrigin,"note_navigation_candidate");
   assert.equal(result.candidates[0].relativePath,"src/Engine/Mover.php");
@@ -67,6 +68,16 @@ test("P9 brief combines Obsidian navigation with evidence and all four C4 views"
   assert.equal(result.architecture.C3.edges.length,1);
   assert.ok(result.evidenceGraph.sourceFiles.every(x=>x.sha256==="fixture-hash"));
   assert.equal(result.architecture.C2.verifiedRuntimeLinks.length,0);
+  assert.equal(result.coverage.completeness,"unknown_static_analysis_cannot_prove_exhaustive_coverage");
+  assert.equal(result.coverage.boundedEdges,1);
+  const experimental=await createEvidenceBrief({engine,docs})({
+    projectId:"term-asteroids",query:"thiết bị hỗ trợ",ranking:"rrf",
+  });
+  assert.equal(experimental.rankingStrategy,"rrf");
+  assert.ok(experimental.candidates.every(x=>x.freshness==="verified_current_hash"));
+  await assert.rejects(createEvidenceBrief({engine,docs})({
+    projectId:"term-asteroids",query:"thiết bị hỗ trợ",ranking:"fake",
+  }),e=>e.code==="INVALID_ARGUMENTS");
 });
 
 test("P9 brief works without Obsidian and does not include stale source",async()=>{
@@ -84,6 +95,7 @@ test("P9 brief works without Obsidian and does not include stale source",async()
   assert.equal(result.candidates.length,1);
   assert.equal(result.candidates[0].relativePath,"src/Engine/Mover.php");
   assert.equal(result.graphLocatorOrigin,"user_query");
+  assert.ok(result.coverage.warnings.some(x=>x.code==="NO_NOTE_COVERAGE"));
   await assert.rejects(createEvidenceBrief({engine,docs})({
     projectId:"term-asteroids",query:" ".repeat(3),
   }),e=>e.code==="INVALID_ARGUMENTS");

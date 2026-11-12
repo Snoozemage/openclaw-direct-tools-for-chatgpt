@@ -40,9 +40,9 @@ function row(r){
 }
 export function rebuildCsharpEdges(db){
   db.prepare("DELETE FROM csharp_edges").run();
-  const facts=db.prepare("SELECT id,file_id,repo_id,relative_path,kind,name,parent,target,status,details FROM csharp_facts").all();
+  const facts=db.prepare("SELECT id,file_id,repo_id,relative_path,kind,name,parent,target,start_line,status,details FROM csharp_facts").all();
   const symbols=new Map(),shortTypes=new Map(),handlerByRequest=new Map(),injectionByClass=new Map(),
-    diByService=new Map(),dbsetsByContext=new Map(),configsByEntity=new Map();
+    diByService=new Map(),dbsetsByContext=new Map(),configsByEntity=new Map(),methodAt=new Map();
   const push=(m,k,v)=>m.set(k,[...(m.get(k)??[]),v]);
   const typenames=new Set(["class","record","interface","struct","controller","ef_context","cqrs_request","dto","service"]);
   for(const f of facts) {
@@ -51,6 +51,7 @@ export function rebuildCsharpEdges(db){
       push(symbols,k+f.kind+"\0"+f.name,f);
       if(typenames.has(f.kind))push(shortTypes,k+short(f.name),f);
     }
+    if(f.kind==="method")push(methodAt,k+f.relative_path+"\0"+f.start_line+"\0"+f.name,f);
     if(f.kind==="cqrs_handler"&&f.target)push(handlerByRequest,k+short(f.target),f);
     if(f.kind==="constructor_dependency"&&f.parent)push(injectionByClass,k+f.parent,f);
     if(f.kind==="di_registration"||f.kind==="di_factory"){
@@ -92,6 +93,17 @@ export function rebuildCsharpEdges(db){
       for(const dependency of (injectionByClass.get(k+f.parent)??[]).slice(0,14)){
         edge(f,dependency,"class_injection_candidate","inferred",dependency.target);
       }
+    }
+    if(f.kind==="semantic_method_call" && f.parent) {
+      const declaring=once(symbols,k+"method\0"+f.parent);
+      if(declaring)edge(declaring,f,"contains_semantic_call","verified_static",f.target);
+      let evidence={};
+      try{evidence=JSON.parse(f.details);}catch{}
+      const target=typeof evidence.declarationPath==="string"&&
+        Number.isInteger(evidence.declarationLine)?
+        once(methodAt,k+evidence.declarationPath+"\0"+evidence.declarationLine+"\0"+f.target):null;
+      edge(f,target,"references_resolved_method",
+        target?"verified_static":"unresolved",f.target);
     }
     if(["mediator_send","table_operation","method_parameter","sql_operation"].includes(f.kind) && f.parent){
       const parent=once(symbols,k+"method"+"\0"+f.parent)??once(symbols,k+"controller_method"+"\0"+f.parent);

@@ -37,6 +37,34 @@ test("HTTP axios/fetch routes, env config, static URL normalization and dynamic 
   assert.equal(normalizeHttpPath("/api/course-subjects/{id:guid}?x=5"),"/api/course-subjects/{}");
   assert.equal(readTypescriptAliases(await readFile(path.join(fixtures,"tsconfig.json"),"utf8"))["@/"],"src/");
 });
+test("single-file TypeChecker records used import bindings but not shadowing locals",()=>{
+  const code=[
+    'import { client as service } from "./api";',
+    'export function yes(){ return service.get("/x"); }',
+    'export function no(service: any){ return service.get("/y"); }',
+    'export function also(){ const other={get:()=>1}; return other.get(); }',
+  ].join("\n");
+  const result=extractTypescriptFacts({relativePath:"src/feature.ts",source:code});
+  assert.equal(result.parseError,null);
+  const uses=result.facts.filter(f=>f.kind==="import_usage");
+  assert.equal(uses.length,1,JSON.stringify(uses));
+  assert.equal(uses[0].target,"service");
+  assert.equal(uses[0].details.binding,"single_file_typechecker_import_symbol");
+  assert.equal(uses[0].details.externalImplementationVerified,false);
+});
+test("many repeated framework hook calls do not crowd out a later imported service",()=>{
+  const source=[
+    'import { useState, service } from "./api";',
+    'export function draw(){',
+    ...Array.from({length:65},()=>"  useState(0);"),
+    '  service.load();',
+    '}',
+  ].join("\n");
+  const result=extractTypescriptFacts({relativePath:"src/long.ts",source});
+  const calls=result.facts.filter(x=>x.kind==="import_usage");
+  assert.deepEqual(calls.map(x=>x.name).sort(),["service.load","useState"]);
+  assert.equal(result.facts.find(x=>x.kind==="module").details.importUsageSampleTruncated,false);
+});
 test("syntax error is reported as no static facts, not as fabricated requests",async()=>{
   const r=extractTypescriptFacts({relativePath:"src/broken.ts",source:"export const service = ;"});
   assert.ok(r.parseError);

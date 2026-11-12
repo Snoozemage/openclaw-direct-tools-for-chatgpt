@@ -53,7 +53,7 @@ function edge(row,lang,from,to,revision){
     evidence:{...from.provenance,relation:row.relation},
   };
 }
-function quotedLike(x){return "%"+x.replace(/[\\%_]/gu,"")+"%";}
+function quotedLike(x){return "%"+x.replace(/[!%_]/gu,c=>"!"+c)+"%";}
 function readFact(db,lang,id,revision){
   const {facts}=SOURCES[lang];
   const r=db.prepare("SELECT f.*,fi.sha256 FROM "+facts+" f JOIN files fi ON fi.file_id=f.file_id WHERE f.id=?").get(id);
@@ -77,7 +77,7 @@ export function selectEvidenceRoots(db,query,{repoIds=[],languages=["php","cshar
     for(const needle of needles){
       if(!needle.literal.trim())continue;
       const sql="SELECT f.*,fi.sha256 FROM "+table+" f JOIN files fi ON fi.file_id=f.file_id "+
-        "WHERE (LOWER(f.name) LIKE ? OR LOWER(f.relative_path) LIKE ?)"+where+" LIMIT 280";
+        "WHERE (LOWER(f.name) LIKE ? ESCAPE '!' OR LOWER(f.relative_path) LIKE ? ESCAPE '!')"+where+" LIMIT 280";
       const rows=db.prepare(sql).all(quotedLike(needle.literal.toLocaleLowerCase("vi")),
         quotedLike(needle.literal.toLocaleLowerCase("vi")),...repoIds);
       for(const r of rows){

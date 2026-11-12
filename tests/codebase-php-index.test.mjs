@@ -77,6 +77,38 @@ test("PHP AST index stores routes/models/migrations and connects static evidence
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
   db.close();
 }));
+test("typed property receiver adds inferred PHP graph edges without guessing untyped calls",async()=>withProject(async({registry,repo})=>{
+  const folder=path.join(repo,"src","Game");
+  await mkdir(folder,{recursive:true});
+  await writeFile(path.join(folder,"Ship.php"),String.raw`<?php
+namespace Example\Game;
+class Ship { public function thrust(): void {} }
+`);
+  await writeFile(path.join(folder,"Pilot.php"),String.raw`<?php
+namespace Example\Game;
+class Pilot {
+  private Ship $ship;
+  public function handle($unknown): void {
+    $this->ship->thrust();
+    $unknown->thrust();
+  }
+}
+`);
+  const engine=createIndexEngine({registry});
+  const status=await finish(engine,"full");
+  assert.equal(status.job.state,"completed",JSON.stringify(status.job.error));
+  const g=await engine.evidenceGraph({projectId:"php-pilot",query:"Example\\Game\\Ship@thrust",
+    languages:["php"],direction:"both",maxDepth:4,maxNodes:40});
+  assert.ok(g.nodes.some(n=>n.name==="Example\\Game\\Pilot@handle"),JSON.stringify({nodes:g.nodes.map(n=>n.name),edges:g.edges.map(e=>e.kind),gaps:g.gaps,roots:g.rootEvidence}));
+  assert.ok(g.nodes.some(n=>n.kind==="member_call"&&
+    n.target==="Example\\Game\\Ship@thrust"));
+  assert.ok(g.edges.some(e=>e.kind==="typed_receiver_method_candidate"&&e.status==="inferred"));
+  assert.ok(!g.nodes.some(n=>n.name.includes("$unknown")));
+  assert.ok(g.edges.every(e=>e.status!=="verified_runtime"));
+  const wildcard=await engine.evidenceGraph({projectId:"php-pilot",query:"Example%Ship@thrust",
+    languages:["php"],direction:"both",maxDepth:3,maxNodes:25});
+  assert.equal(wildcard.nodes.length,0,"Percent in a user locator must not become a LIKE wildcard");
+}));
 test("PHP AST metadata persists, incremental detects source changes and invalidates old edges",async()=>withProject(async({registry,repo})=>{
   const engine=createIndexEngine({registry});
   const first=await finish(engine,"full");

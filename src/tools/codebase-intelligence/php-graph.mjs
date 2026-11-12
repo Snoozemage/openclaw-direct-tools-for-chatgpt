@@ -44,7 +44,7 @@ export function getPhpCounts(db) {
     throw e;
   }
 }
-const PRIORITY={route:0,model:1,class:2,method:3,model_table:4,
+const PRIORITY={route:0,model:1,class:2,method:3,member_call:4,model_table:4,
   eloquent_relation:5,migration_table:6,table_access:7,table_operation:7,model_field:8,
   migration_column:9,static_call:10,blade_route_reference:11,view_file:12,view_render:13,trait:14,interface:15};
 
@@ -96,7 +96,7 @@ export function rebuildPhpEdges(db) {
       edge(f,method,"route_handler",!method?"unresolved":
         f.status==="verified_static"?"verified_static":"inferred",f.target);
     }
-    if(["static_call","table_access","table_operation","view_render","eloquent_relation"].includes(f.kind) && f.parent) {
+    if(["static_call","member_call","table_access","table_operation","view_render","eloquent_relation"].includes(f.kind) && f.parent) {
       const method=one(repo,"method",f.parent);
       if(method)edge(method,f,"contains_source_reference","verified_static",f.name);
     }
@@ -108,6 +108,13 @@ export function rebuildPhpEdges(db) {
         const method=one(repo,"method",f.target);
         if(method)edge(f,method,"references_static_method","inferred",f.target);
       }
+    }
+    if(f.kind==="member_call" && f.target) {
+      const called=one(repo,"method",f.target);
+      // A declared type is only a candidate: the runtime could dispatch an
+      // override. When no indexed declaration matches, retain an explicit gap.
+      edge(f,called,"typed_receiver_method_candidate",
+        called?"inferred":"unresolved",f.target);
     }
     if(f.kind==="eloquent_relation" && f.target) {
       const model=one(repo,"model",f.target);

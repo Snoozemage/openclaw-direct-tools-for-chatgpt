@@ -162,11 +162,12 @@ export function createCodebaseIntelligenceHandler({
       }
 
       if (args?.action === "brief") {
-        checkFields(args, ["action", "projectId", "query", "repoIds", "languages", "limit", "maxDepth", "maxNodes"]);
+        checkFields(args, ["action", "projectId", "query", "repoIds", "languages", "limit", "maxDepth", "maxNodes", "ranking"]);
         return success("brief", { brief: await evidenceBrief({
           projectId:args.projectId,query:args.query,
           repoIds:args.repoIds??[],languages:args.languages??[],
           limit:args.limit??8,maxDepth:args.maxDepth??5,maxNodes:args.maxNodes??55,
+          ranking:args.ranking??"note_first",
         }) });
       }
 

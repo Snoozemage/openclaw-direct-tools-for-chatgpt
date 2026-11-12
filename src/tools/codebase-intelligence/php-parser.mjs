@@ -7,7 +7,7 @@ import { ProjectRegistryError } from "./registry.mjs";
 const HELPER_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "php-helper");
 const HELPER_SCRIPT = path.join(HELPER_DIR, "extract.php");
 const AUTOLOAD = path.join(HELPER_DIR, "vendor", "autoload.php");
-export const PHP_ADAPTER_VERSION = "php-ast-v4-views-precision:nikic-5.7.0";
+export const PHP_ADAPTER_VERSION = "php-ast-v5-typed-member-calls:nikic-5.7.0";
 const MAX_OUTPUT = 3_500_000;
 const MAX_SOURCE = 2_100_000;
 
@@ -78,7 +78,7 @@ export async function extractPhpFacts({ relativePath, source, signal, timeoutMs 
         if (parsed.facts.length > 3500) throw Error("Too many parser facts");
         const facts = parsed.facts.map((fact) => {
           if (!fact || !["route","class","interface","trait","model","model_table","model_field",
-            "method","eloquent_relation","table_access","table_operation","view_render","migration_table","migration_column","static_call"].includes(fact.kind) ||
+            "method","eloquent_relation","table_access","table_operation","view_render","migration_table","migration_column","static_call","member_call"].includes(fact.kind) ||
               typeof fact.name !== "string" || !Number.isInteger(fact.startLine) ||
               !Number.isInteger(fact.endLine) || fact.startLine <= 0 || fact.endLine < fact.startLine ||
               !["verified_static","inferred","unresolved"].includes(fact.status)) throw Error("Invalid parser fact");

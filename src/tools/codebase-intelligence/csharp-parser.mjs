@@ -6,12 +6,12 @@ import { ProjectRegistryError } from "./registry.mjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "csharp-helper");
 const dll = path.join(root, "bin", "Release", "net9.0", "CodebaseRoslyn.dll");
-export const CSHARP_ADAPTER_VERSION = "roslyn-sdk9-csharp-v5-ef-dto-sql";
+export const CSHARP_ADAPTER_VERSION = "roslyn-sdk9-csharp-v6-semantic-call-sites";
 const KINDS = new Set(["interface","class","record","struct","controller","controller_method",
   "method","dto_property","cqrs_handler","cqrs_request","constructor_dependency","mediator_send",
   "ef_context","ef_dbset","ef_configuration","ef_table","di_registration","endpoint",
   "ef_context_registration","ef_property","di_factory","dto","dto_field","service","method_parameter",
-  "sql_operation","ef_migration_table","ef_migration_column"]);
+  "sql_operation","ef_migration_table","ef_migration_column","semantic_method_call"]);
 const STATES = new Set(["verified_static","inferred","unresolved"]);
 const MAX_OUTPUT_BYTES = 7_000_000;
 const MAX_BATCH = 28;

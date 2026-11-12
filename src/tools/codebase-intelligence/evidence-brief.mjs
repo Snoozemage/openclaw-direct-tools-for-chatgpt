@@ -1,5 +1,6 @@
 import {ProjectRegistryError} from "./registry.mjs";
 import {projectC4FromGraph} from "./graph-projector.mjs";
+import {rankSourceAndNotes} from "./rank-fusion.mjs";
 
 const DOCS_UNAVAILABLE=new Set(["DOC_SCOPE_MISSING","DOC_INDEX_MISSING","DOC_SCOPE_CHANGED"]);
 
@@ -68,15 +69,49 @@ function compactView(view,level){
     fromId:x.fromId,toId:x.toId,kind:x.kind,status:x.status,
   }))};
 }
+function coverageSignals({graph,c1,c2,docsStatus,candidates}){
+  const warnings=[];
+  const note=(code,meaning)=>warnings.push({code,meaning});
+  if(!graph.rootEvidence?.length)note("NO_MATCHED_AST_ROOT",
+    "No matching indexed AST symbol; search results alone cannot prove a code flow.");
+  if(graph.nodes.length && !graph.edges.length)note("ISOLATED_CODE_GRAPH",
+    "Indexed source symbols have no resolved links in this bounded trace.");
+  if(graph.truncated)note("GRAPH_BUDGET_EXCEEDED",
+    "Traversal stopped at a node, depth or edge limit; this view is incomplete.");
+  if(graph.gaps?.length)note("UNRESOLVED_REFERENCES",
+    "Some static references have unknown or ambiguous targets; see unresolvedByKind.");
+  if(graph.staleCount||graph.stale?.length)note("STALE_SOURCE_EVIDENCE",
+    "Changed source files were omitted from the projected graph.");
+  if(c1.contextStatus==="system_context_incomplete"||!c1.edges?.length)
+    note("C1_CONTEXT_UNVERIFIED","System actors/external connections need curated evidence.");
+  if(c2.dataFlowStatus==="runtime_unverified")
+    note("C2_RUNTIME_UNVERIFIED","Source manifests do not prove deployed topology or network links.");
+  if(docsStatus!=="available")note("NO_NOTE_COVERAGE",
+    "Obsidian notes are unavailable or unindexed for this project.");
+  if(!candidates.length)note("NO_VERIFIED_SOURCE_CANDIDATE",
+    "No current-hash source candidates for the query.");
+  const unresolvedByKind={};
+  for(const gap of graph.gaps??[]){
+    const kind=gap.kind??gap.relation??"unknown";
+    unresolvedByKind[kind]=(unresolvedByKind[kind]??0)+1;
+  }
+  return {completeness:"unknown_static_analysis_cannot_prove_exhaustive_coverage",
+    indexedGraphRoots:graph.rootEvidence?.length??0,
+    boundedNodes:graph.nodes.length,boundedEdges:graph.edges.length,
+    unresolvedByKind,staleCount:graph.staleCount??graph.stale?.length??0,
+    truncated:graph.truncated,warnings};
+}
 
 export function createEvidenceBrief({engine,docs}){
   return async function brief({projectId,query,repoIds=[],languages=[],
-    limit=8,maxDepth=5,maxNodes=55}={}){
+    limit=8,maxDepth=5,maxNodes=55,ranking="note_first"}={}){
     if(typeof query!=="string"||!query.trim()||query.length>240)
       throw new ProjectRegistryError("INVALID_ARGUMENTS","Brief needs a nonempty query (max 240 characters).");
     if(!Number.isInteger(limit)||limit<1||limit>20)
       throw new ProjectRegistryError("INVALID_ARGUMENTS","Brief limit must be 1–20.");
 
+    if(!["note_first","rrf"].includes(ranking))
+      throw new ProjectRegistryError("INVALID_ARGUMENTS","Brief ranking must be note_first or rrf.");
     let docsStatus="not_configured",docsResults=null,search;
     try{
       const found=await docs.search({projectId,query,limit:Math.min(limit,12)});
@@ -100,7 +135,10 @@ export function createEvidenceBrief({engine,docs}){
           lang==="typescript"?/\.(?:ts|tsx)$/u.test(p):
           lang==="sql"?p.endsWith(".sql"):lang==="config"?/\.(?:json|ya?ml)$/u.test(p):false;
       })));
-    const candidates=sourceCandidates(search.results??[],filteredNoteLinks,query,limit);
+    const candidates=ranking==="rrf"?rankSourceAndNotes({
+      sourceResults:search.results??[],noteReferences:filteredNoteLinks,query,limit,
+      strategy:"rrf",
+    }):sourceCandidates(search.results??[],filteredNoteLinks,query,limit);
     const options={projectId,repoIds,languages,maxDepth,maxNodes,limit:1};
     let graph=await engine.evidenceGraph({...options,query,direction:"both"});
     let graphLocator=query,graphLocatorOrigin="user_query";
@@ -121,7 +159,7 @@ export function createEvidenceBrief({engine,docs}){
     return {
       projectId,query,indexRevision:graph.indexRevision,
       mode:"source_evidence_brief_not_runtime_proof",
-      graphLocator,graphLocatorOrigin,docsStatus,
+      graphLocator,graphLocatorOrigin,docsStatus,rankingStrategy:ranking,
       candidates,
       sourceExcerpts:(search.results??[]).filter(x=>x.freshness==="verified_current_hash")
         .slice(0,limit).map(x=>({repoId:x.repoId,relativePath:x.relativePath,
@@ -132,6 +170,7 @@ export function createEvidenceBrief({engine,docs}){
         .map(x=>({title:x.title,relativePath:x.relativePath,
           documentType:x.documentType,sha256:x.sha256})),
       evidenceGraph:summarizeGraph(graph),
+      coverage:coverageSignals({graph,c1,c2,docsStatus,candidates}),
       architecture:{
         C1:{mode:c1.mode,nodes:c1.nodes,edges:c1.edges,missingEvidence:c1.missingEvidence,mermaid:c1.mermaid},
         C2:{mode:c2.mode,nodes:c2.nodes,edges:c2.edges,
@@ -143,7 +182,7 @@ export function createEvidenceBrief({engine,docs}){
         "Documentary note paths are navigation candidates, not source call links.",
         "Static references do not prove runtime communication or deployment.",
         "C1 actors and C2 runtime topology remain incomplete without external verification.",
-        "Missing PHP dynamic receiver edges do not mean no call occurs.",
+        "PHP typed property/parameter/self receiver calls are static candidates; untyped, inherited, or dynamic receivers may still be absent.",
       ],
     };
   };

@@ -171,6 +171,34 @@ static class Program {
           }
         }
         foreach(var inv in method.DescendantNodes().OfType<InvocationExpressionSyntax>()) {
+          // Roslyn SemanticModel can identify the exact declared method when
+          // its defining file is present in this bounded compilation batch.
+          // Do not link by spelling: overloaded/ambiguous/external method calls
+          // are left for a future full Solution reference index.
+          var resolved=semantic.GetSymbolInfo(inv).Symbol as IMethodSymbol;
+          if(resolved is not null && resolved.MethodKind is MethodKind.Ordinary &&
+             resolved.DeclaringSyntaxReferences.Length>0) {
+            var definition=resolved.OriginalDefinition;
+            var declarations=definition.DeclaringSyntaxReferences;
+            if(declarations.Length==1 &&
+               declarations[0].GetSyntax() is MethodDeclarationSyntax declaration &&
+               declaration.SyntaxTree.FilePath is string declaredFile &&
+               !string.IsNullOrEmpty(declaredFile)) {
+              var enclosing=definition.ContainingType;
+              var target=enclosing?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat)+"@"+
+                definition.Name;
+              if(!string.IsNullOrEmpty(target) && target.Length<=380) {
+                Add("semantic_method_call",id+" => "+target,inv,parent:id,target:target,
+                  status:"verified_static",
+                  details:Detail(("resolver","roslyn_semantic_in_batch"),
+                    ("declarationPath",declaredFile),
+                    ("declarationLine",Start(declaration)),
+                    ("runtimeDispatchVerified",false),
+                    ("virtualDispatchPossible",definition.IsVirtual||
+                      definition.IsOverride||definition.IsAbstract)));
+              }
+            }
+          }
           if(inv.Expression is MemberAccessExpressionSyntax ma) {
             var invoked=ma.Name.Identifier.Text;
             if(invoked is "FromSqlRaw" or "ExecuteSqlRaw" or "FromSqlInterpolated" or "ExecuteSqlInterpolated" or "SqlQueryRaw") {

@@ -110,6 +110,13 @@ test("P9 brief integrates indexed Obsidian navigation and C1–C4 without writin
   assert.ok(result.candidates.every(x=>x.repoId==="training-ts"));
   assert.ok(result.evidenceGraph.nodes.every(x=>x.freshness==="verified_current_hash"));
   assert.deepEqual(result.architecture.C2.verifiedRuntimeLinks,[]);
+  const trial=await handler("openclaw_codebase_intelligence",{
+    action:"brief",projectId:id,query:"teaching devices",
+    repoIds:["training-ts"],languages:["typescript"],ranking:"rrf",limit:8,
+  });
+  assert.equal(trial.structuredContent.ok,true);
+  assert.equal(trial.structuredContent.brief.rankingStrategy,"rrf");
+  assert.ok(trial.structuredContent.brief.candidates.every(x=>x.repoId==="training-ts"));
   await assert.rejects(stat(generated),{code:"ENOENT"});
 }));
 test("P7 stale manual note hides cached content after edits",async()=>withProject(async({docs,note})=>{

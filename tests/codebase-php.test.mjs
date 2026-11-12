@@ -72,6 +72,37 @@ test("extracts PHP controllers, model Eloquent relations, fillable fields and mi
   assert.ok(m.facts.some((x)=>x.kind==="eloquent_relation" && x.target==="App\\Models\\Course"));
   assert.ok(db.facts.some((x)=>x.kind==="migration_table" && x.target==="course_subjects" && x.details.columns.includes("credit")));
 });
+test("resolves only declared PHP instance receivers without guessing dynamic calls", async () => {
+  const code=String.raw`<?php
+namespace Example\Game;
+class Ship {
+  public function thrust(): void {}
+  public function brake(): void {}
+}
+class Pilot {
+  private ?\Example\Game\Ship $ship;
+  private $unknown;
+  public function move(Ship $other, $dynamic): void {
+    $this->ship->thrust();
+    $other->brake();
+    $dynamic->thrust();
+    $this->unknown->thrust();
+    $this->go();
+  }
+  public function go(): void {}
+}
+`;
+  const parsed=await extractPhpFacts({relativePath:"src/Game/Pilot.php",source:code});
+  assert.equal(parsed.parseError,null);
+  const calls=parsed.facts.filter(x=>x.kind==="member_call");
+  assert.deepEqual(calls.map(x=>x.target).sort(),[
+    "Example\\Game\\Pilot@go","Example\\Game\\Ship@brake","Example\\Game\\Ship@thrust"
+  ].sort());
+  assert.ok(calls.every(x=>x.status==="inferred"));
+  assert.ok(calls.some(x=>x.details.receiverEvidence==="declared_property_type"));
+  assert.ok(calls.some(x=>x.details.receiverEvidence==="typed_parameter"));
+  assert.ok(!calls.some(x=>x.name.includes("unknown")));
+});
 test("syntax failures are explicit and never turn into fake verified facts", async () => {
   const r=await extractPhpFacts({relativePath:"routes/broken.php",source:"<?php if ("});
   assert.ok(r.parseError);

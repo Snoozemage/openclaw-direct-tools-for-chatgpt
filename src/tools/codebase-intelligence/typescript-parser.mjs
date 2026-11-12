@@ -6,7 +6,7 @@ import { ProjectRegistryError } from "./registry.mjs";
 
 const helperRoot=path.join(path.dirname(fileURLToPath(import.meta.url)),"typescript-helper");
 const requireTs=createRequire(path.join(helperRoot,"package.json"));
-export const TYPESCRIPT_ADAPTER_VERSION="ts-ast-v3-safe-base:typescript-5.8.3";
+export const TYPESCRIPT_ADAPTER_VERSION="ts-ast-v4-local-typechecker-import-use:typescript-5.8.3";
 const MAX_FACTS=850;
 let compiler;
 function fail(code,message){throw new ProjectRegistryError(code,message);}
@@ -112,7 +112,63 @@ export function extractTypescriptFacts({relativePath,source}={}){
     const [startLine,endLine]=loc(node);
     facts.push({kind,name:String(name).slice(0,600),parent,target,startLine,endLine,status,details});
   }
-  add("module",relativePath,file);
+  // Single-file, in-memory type checking: prove that a call's receiver
+  // resolves to its import binding rather than a shadowing local variable.
+  // This does NOT resolve the imported symbol's implementation across files.
+  const hasImports=file.statements.some(ts.isImportDeclaration);
+  const checkerEligible=source.length<=100_000&&hasImports;
+  let checkerCallBudgetHit=false;
+  if(checkerEligible){
+    const options={noLib:true,noResolve:true,skipLibCheck:true,
+      module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022};
+    const host={
+      getSourceFile:name=>name===relativePath?file:undefined,
+      getDefaultLibFileName:()=>"",
+      writeFile:()=>{},getCurrentDirectory:()=>"/",
+      getDirectories:()=>[],fileExists:name=>name===relativePath,
+      readFile:name=>name===relativePath?source:undefined,
+      useCaseSensitiveFileNames:()=>true,getCanonicalFileName:name=>name,
+      getNewLine:()=>"\n",
+    };
+    const checker=ts.createProgram([relativePath],options,host).getTypeChecker();
+    let count=0;
+    const seenUsage=new Set();
+    const track=node=>{
+      if(count>=48){checkerCallBudgetHit=true;return;}
+      if(ts.isCallExpression(node)){
+        const expression=node.expression;
+        const receiver=ts.isIdentifier(expression)?expression:
+          ts.isPropertyAccessExpression(expression)&&ts.isIdentifier(expression.expression)?
+            expression.expression:null;
+        if(receiver){
+          const symbol=checker.getSymbolAtLocation(receiver);
+          const declaration=symbol?.declarations?.find(d=>
+            ts.isImportSpecifier(d)||ts.isImportClause(d)||ts.isNamespaceImport(d));
+          if(declaration){
+            const target=receiver.text;
+            const operation=ts.isPropertyAccessExpression(expression)?expression.name.text:null;
+            const usageKey=target+"\0"+(operation??"");
+            if(!seenUsage.has(usageKey)){
+              seenUsage.add(usageKey);
+              add("import_usage",target+(operation?"."+operation:""),node,{
+              parent:relativePath,target,status:"verified_static",
+              details:{binding:"single_file_typechecker_import_symbol",
+                local:target,operation,externalImplementationVerified:false},
+              });
+              count++;
+            }
+          }
+        }
+      }
+      ts.forEachChild(node,track);
+    };
+    track(file);
+  }
+  add("module",relativePath,file,{details:{
+    singleFileTypeChecker:checkerEligible?"ran":hasImports?"skipped_source_size_budget":"not_needed",
+    crossFileSemanticResolution:"unverified",
+    importUsageSampleTruncated:checkerCallBudgetHit,
+  }});
   const route=nextRouteFromPath(relativePath);
   if(route)add(route.type,route.route,file,{parent:relativePath,
     details:{appRouter:true,route:route.route,sourceFile:relativePath}});
