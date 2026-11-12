@@ -1,0 +1,10 @@
+{
+  "name": "openclaw-codebase-ts-parser",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Isolated static TypeScript compiler for Codebase Intelligence",
+  "type": "module",
+  "dependencies": {
+    "typescript": "5.8.3"
+  }
+}
