@@ -6,7 +6,7 @@ export const runtimeToolDefinitions = [
   {
     name: "openclaw_exec",
     title: "Run Command",
-    description: "Run a shell command through OpenClaw's native exec tool. Use for builds, tests, Git, package managers, and other development commands. If the result says a process is still running, use openclaw_process with its sessionId. On Windows, invoke executables directly and use backslash paths; do not wrap commands in cmd /c or powershell -Command.",
+    description: "Run a shell command through OpenClaw's native exec tool. Use for builds, tests, Git, package managers, and other development commands. Always set background: true when launching a GUI application or any persistent server/watcher so it survives exec completion; leave it off for finite commands. If the result says a process is still running, use openclaw_process with its sessionId. On Windows, invoke executables directly and use backslash paths; do not wrap commands in cmd /c or powershell -Command.",
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: "object",
@@ -17,7 +17,7 @@ export const runtimeToolDefinitions = [
         env: { type: "object", patternProperties: { "^.*$": { type: "string" } }, description: "Literal environment variable overrides; values are not expanded." },
         yieldMs: number("Milliseconds before returning a running-command handle; default 10000."),
         awaitResults: boolean("Wait for the terminal result when needed; do not use for detached servers."),
-        background: boolean("Start an independent background service that survives the request."),
+        background: boolean("Start an independent background process that survives the request. Set true when launching a GUI app, persistent server, watcher, or other long-lived process; omit for finite commands."),
         timeoutSeconds: number("Maximum process lifetime in seconds; 0 disables the timeout."),
         pty: boolean("Allocate a pseudo-terminal for commands that genuinely require interactive TTY behavior."),
         elevated: boolean("Request host elevation if allowed by policy."),
