@@ -25,7 +25,7 @@ export const fileSearchToolDefinitions = [
   {
     name: "openclaw_grep",
     title: "Search File Contents",
-    description: "Search file contents by invoking ripgrep (rg) directly without a shell. Requires rg.exe on PATH, or OPENCLAW_RIPGREP_PATH to point to it. Returns up to 100 matching lines with absolute file paths and line numbers. The path defaults to the OpenClaw workspace and may be a file or directory. Use include to limit files, for example *.ts or *.{ts,tsx}. Respects ripgrep's standard ignore rules such as .gitignore, skips hidden and binary files by default, excludes .git and node_modules explicitly, and skips files larger than 2 MiB. Matching is case-sensitive and line-based.",
+    description: "Search file contents by invoking ripgrep (rg) directly without a shell. Returns up to 100 matching lines with absolute file paths and line numbers. The path defaults to the OpenClaw workspace and may be a file or directory. Use include to limit files, for example *.ts or *.{ts,tsx}. Respects ripgrep's standard ignore rules such as .gitignore, skips hidden and binary files by default, excludes .git and node_modules explicitly, and skips files larger than 2 MiB. Matching is case-sensitive and line-based.",
     annotations: readOnlyAnnotations,
     inputSchema: {
       type: "object",

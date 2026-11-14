@@ -161,6 +161,8 @@ test("start_here returns bridge-specific operating instructions", async () => {
 
   assert.match(instructions, /openclaw_tool_search[\s\S]*openclaw_tool_describe[\s\S]*openclaw_dispatch_action/u);
   assert.match(instructions, /openclaw_process/u);
+  assert.match(instructions, /explicitly pass background: true/u);
+  assert.match(instructions, /Do not use background for ordinary finite commands/u);
   assert.match(instructions, /batch forms when supported \(up to five items\)/u);
   assert.match(instructions, /action: "act"[\s\S]*kind: "batch"/u);
   assert.match(instructions, /up to five predictable actions/u);
