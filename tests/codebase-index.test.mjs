@@ -88,6 +88,13 @@ test("full index persists FTS5, Unicode search, safe snippets and status after r
   assert.ok(found.results.every((item) => item.freshness === "verified_current_hash"));
   const words = await engine.search({ projectId: "vaa-test", query: "Teaching Devices" });
   assert.ok(words.results.some((item) => item.relativePath === "src/device.cs"));
+  const partial = await engine.search({projectId:"vaa-test",query:"quản lý sinh viên"});
+  assert.equal(partial.matchMode,"any_term_fallback_min_two");
+  const partialCourse = partial.results.find(x=>x.relativePath==="src/course.php");
+  assert.equal(partialCourse.sourceMatch,"partial_lexical_overlap_candidate");
+  assert.ok(partialCourse.missingQueryTerms.includes("sinh"));
+  assert.ok(partialCourse.missingQueryTerms.includes("viên"));
+  assert.ok(partialCourse.queryCoverage<1);
   const secret = await engine.search({ projectId: "vaa-test", query: "SUPER_SECRET_VALUE" });
   assert.equal(secret.results.length, 0);
   const missing = await engine.search({ projectId: "vaa-test", query: "NEVER_INDEX_ME" });
@@ -100,6 +107,35 @@ test("full index persists FTS5, Unicode search, safe snippets and status after r
   const db = await openExistingIndex(path.join(stateRoot, "index"), "vaa-test");
   assert.ok(db.prepare("PRAGMA integrity_check").get().integrity_check === "ok");
   db.close();
+}));
+
+test("P1 source search discovers an unaliased Vietnamese feature path with verified hashes", async () => fixture(async ({ registry, source }) => {
+  const feature = path.join(source, "src", "features", "ke-hoach-giang-day");
+  await mkdir(feature, { recursive: true });
+  const page = path.join(feature, "main-view-page.tsx");
+  await writeFile(page, "export default function PlanningPage() { return null; }\n");
+  await mkdir(path.join(feature, "mocks"));
+  await writeFile(path.join(feature, "mocks", "planning.mock.ts"), "export const mockPlan = true;\n");
+  const engine = createIndexEngine({ registry });
+  const completed = await finish(engine, "vaa-test", "full");
+  assert.equal(completed.job.state, "completed", JSON.stringify(completed.job.error));
+  const found = await engine.search({ projectId: "vaa-test",
+    query: "quản lý kế hoạch học kỳ", limit: 5 });
+  assert.equal(found.ranking, "lexical_path_phrase_candidates_then_fts");
+  assert.equal(found.results[0].relativePath, "src/features/ke-hoach-giang-day/main-view-page.tsx");
+  assert.equal(found.results[0].sourceMatch, "lexical_path_phrase_candidate");
+  assert.equal(found.results[0].matchedTerms, "ke hoach");
+  assert.equal(found.results[0].queryCoverage, 0.5);
+  assert.equal(found.results[0].freshness, "verified_current_hash");
+  const unrelated = await engine.search({ projectId: "vaa-test",
+    query: "đánh giá rèn luyện sinh viên", limit: 5 });
+  assert.ok(unrelated.results.every(x => x.sourceMatch !== "lexical_path_phrase_candidate"));
+  await writeFile(page, "export default function ChangedPage() { return null; }\n");
+  const stale = await engine.search({ projectId: "vaa-test",
+    query: "quản lý kế hoạch học kỳ", limit: 5 });
+  assert.ok(!stale.results.some(x => x.relativePath === "src/features/ke-hoach-giang-day/main-view-page.tsx"
+    && x.sourceMatch === "lexical_path_phrase_candidate"),
+  "Unindexed source edits must never receive verified source-path evidence");
 }));
 
 test("incremental updates only changed files, removes stale and handles rename", async () => fixture(async ({ registry, source }) => {

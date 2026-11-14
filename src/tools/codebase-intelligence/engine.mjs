@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {selectEvidenceRoots,sourceLocatorAliases,traverseEvidence,redactStaleGraph,projectC4FromGraph,
   projectC1,projectC2,classifyImpact,indexedTestCandidates} from "./graph-projector.mjs";
 import {loadCuratedContext} from "./curated-context.mjs";
+import {rankUnmappedSourcePaths} from "./source-path-discovery.mjs";
 import path from "node:path";
 import { ProjectRegistryError, validateProjectId } from "./registry.mjs";
 import { scanProject, snapshotRepositories, readSafeFile, makeChunks, INDEX_LIMITS } from "./scanner.mjs";
@@ -442,12 +443,20 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
         const relativeLine = Math.max(0, lineOffset);
         const snippet = verified ? bodyLines.slice(Math.max(0, relativeLine - 1), relativeLine + 2)
           .map((line) => line.slice(0, 220)).join("\n").slice(0, 550) : null;
+        const indexedText=(match.relativePath+" "+match.body).normalize("NFKC").toLocaleLowerCase("vi");
+        const matchedTerms=terms.filter(term=>indexedText.includes(term));
+        const missingQueryTerms=terms.filter(term=>!indexedText.includes(term));
         results.push({
           repoId: match.repoId, relativePath: match.relativePath, language: match.language,
           startLine: match.startLine + relativeLine, endLine: Math.min(match.endLine, match.startLine + relativeLine + 2),
           sha256: match.sha256, score: Number(match.score.toFixed(4)),
           freshness: verified ? "verified_current_hash" : "stale_or_unavailable",
           snippet,
+          ...(matchMode.startsWith("any_term_fallback")?{
+            sourceMatch:"partial_lexical_overlap_candidate",
+            matchedTerms:matchedTerms.join(" "),missingQueryTerms,
+            queryCoverage:Number((matchedTerms.length/terms.length).toFixed(2)),
+          }:{}),
           ...(verified&&tsEvidence.get(match.repoId+":"+match.relativePath)?.sha256===match.sha256?{
             astMatch:{kind:tsEvidence.get(match.repoId+":"+match.relativePath).kind,
               name:tsEvidence.get(match.repoId+":"+match.relativePath).name,
@@ -537,6 +546,35 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
             sourceMatch:"curated_alias_path_candidate",matchedAlias:file.alias});
         }
       }
+      // When no curated alias applies, use contiguous, diacritic-insensitive
+      // phrase overlap in indexed paths. This is generic source navigation,
+      // not a semantic translation or proof the feature implements the request.
+      const genericSourceFileMatches=[];
+      if(!aliases.length&&!exactSourceFileMatches.length){
+        const indexedFiles=db.prepare("SELECT repo_id AS repoId,relative_path AS relativePath,language,sha256 FROM files").all();
+        const candidates=rankUnmappedSourcePaths(query,indexedFiles,{
+          repoIds,languages,limit:Math.min(60,limit*8),
+        });
+        for(const file of candidates){
+          const root=roots.get(file.repoId);
+          let safe=null;
+          try{
+            const absolute=path.join(root,file.relativePath);
+            const resolved=await import("node:fs/promises").then(fs=>fs.realpath(absolute));
+            safe=await readSafeFile({root,relativePath:file.relativePath,absolutePath:resolved});
+          }catch{}
+          if(safe?.hash!==file.sha256)continue;
+          genericSourceFileMatches.push({
+            repoId:file.repoId,relativePath:file.relativePath,language:file.language,
+            startLine:1,endLine:Math.min(3,safe.text.split("\n").length),
+            sha256:file.sha256,score:-65,freshness:"verified_current_hash",
+            snippet:safe.text.split("\n").slice(0,3).join("\n").slice(0,400),
+            sourceMatch:"lexical_path_phrase_candidate",
+            matchedTerms:file.matchedTerms,queryCoverage:Number(file.coverage.toFixed(2)),
+          });
+          if(genericSourceFileMatches.length>=Math.min(36,limit*6))break;
+        }
+      }
       // Preserve at least one verified navigation candidate from each relevant repo
       // before filling with lower-priority files from the same feature.
       const aliasByRepo=new Map();
@@ -545,7 +583,14 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
       }
       const diverseAliasFiles=[...aliasByRepo.values(),...aliasSourceFileMatches].filter((r,i,a)=>
         a.findIndex(x=>x.repoId===r.repoId&&x.relativePath===r.relativePath)===i);
-      const ranked=[...exactSourceFileMatches,...diverseAliasFiles,...results].filter((r,i,a)=>
+      const genericByRepo=new Map();
+      for(const item of genericSourceFileMatches){
+        if(!genericByRepo.has(item.repoId))genericByRepo.set(item.repoId,item);
+      }
+      const genericBudget=Math.max(1,limit-Math.min(2,results.length));
+      const diverseGenericFiles=[...genericByRepo.values(),...genericSourceFileMatches].filter((r,i,a)=>
+        a.findIndex(x=>x.repoId===r.repoId&&x.relativePath===r.relativePath)===i).slice(0,genericBudget);
+      const ranked=[...exactSourceFileMatches,...diverseAliasFiles,...diverseGenericFiles,...results].filter((r,i,a)=>
         a.findIndex(x=>x.repoId===r.repoId&&x.relativePath===r.relativePath)===i).slice(0,limit);
       return {
         projectId, query, indexRevision: revision.revision, indexedAt: revision.indexed_at,
@@ -553,11 +598,12 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
         mode: "lexical_fts5", matchMode,
         ranking:exactSourceFileMatches.length?"verified_exact_basename_then_ast_fts":
           aliasSourceFileMatches.length?"curated_alias_path_candidates_then_ast_fts":
+          genericSourceFileMatches.length?"lexical_path_phrase_candidates_then_fts":
           tsRerank&&tsEvidence.size?"ts_ast_evidence_then_fts":"fts5",
         results:ranked, count: ranked.length,
         staleResults: ranked.filter(x=>x.freshness==="stale_or_unavailable").length,
         truncated: matches.length >= Math.min(160, limit * 6) && results.length >= limit,
-        note: "Lexical FTS5; PHP, C# and TS/Next AST search/trace are separate. HTTP contract matches remain candidates when runtime base URL or adapter selection is not proved; C4 is later. Curated alias path matches support source navigation only, not business equivalence or runtime evidence."
+        note: "Lexical FTS5; PHP, C# and TS/Next AST search/trace are separate. HTTP contract matches remain candidates when runtime base URL or adapter selection is not proved; C4 is later. Curated aliases and generic path phrases support source navigation only, not business equivalence or runtime evidence."
       };
     } finally { db?.close(); }
   }
