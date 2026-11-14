@@ -11,20 +11,23 @@ import {openExistingIndex} from "../src/tools/codebase-intelligence/store.mjs";
 import {createCodebaseIntelligenceHandler} from "../src/tools/codebase-intelligence/handler.mjs";
 
 const fixtures=path.join(path.dirname(fileURLToPath(import.meta.url)),"fixtures");
-async function withProject(cb){
+async function withProject(cb,{includePhp=false}={}){
   const dir=await mkdtemp(path.join(os.tmpdir(),"openclaw-ts-p5-"));
-  const fe=path.join(dir,"ts"),be=path.join(dir,"cs"),stateRoot=path.join(dir,"state");
+  const fe=path.join(dir,"ts"),be=path.join(dir,"cs"),legacy=path.join(dir,"legacy"),stateRoot=path.join(dir,"state");
   try{
-    for(const d of [fe,be,stateRoot])await mkdir(d);
+    for(const d of [fe,be,stateRoot,...(includePhp?[legacy]:[])])await mkdir(d);
     await cp(path.join(fixtures,"codebase-typescript"),fe,{recursive:true});
     await cp(path.join(fixtures,"codebase-csharp"),be,{recursive:true});
-    for(const repo of [fe,be])execFileSync("git",["init","-q",repo],{windowsHide:true,timeout:5000});
+    if(includePhp)await cp(path.join(fixtures,"codebase-php"),legacy,{recursive:true});
+    for(const repo of [fe,be,...(includePhp?[legacy]:[])])
+      execFileSync("git",["init","-q",repo],{windowsHide:true,timeout:5000});
     const registry=createProjectRegistry({stateRoot});
     await registry.register({projectId:"ts-pilot",repositories:[
       {id:"training-ts",root:fe,languages:["typescript"]},
       {id:"training-csharp",root:be,languages:["csharp","sql"]},
+      ...(includePhp?[{id:"legacy-php",root:legacy,languages:["php","sql"]}]:[]),
     ]});
-    await cb({dir,fe,be,stateRoot,registry});
+    await cb({dir,fe,be,legacy,stateRoot,registry});
   }finally{await rm(dir,{recursive:true,force:true,maxRetries:9,retryDelay:175});}
 }
 async function complete(engine,mode="incremental"){
@@ -92,6 +95,21 @@ test("FE mock adapter audit never claims runtime backend; HTTP route match stays
   assert.equal(mock.activeMockAdapters[0].name,"teachingDevicesService");
   assert.equal(mock.matchedContracts.length,0);
   assert.deepEqual(mock.verifiedRuntimeLinks,[]);
+  const businessQuery="thiết bị hỗ trợ giảng dạy theo học phần";
+  const navigated=await engine.search({projectId:"ts-pilot",query:businessQuery,limit:8});
+  assert.ok(navigated.results.some(x=>x.relativePath==="src/app/(admin)/teaching-devices/page.tsx" &&
+    x.sourceMatch==="curated_alias_path_candidate" && x.freshness==="verified_current_hash"),
+    JSON.stringify(navigated.results.map(x=>({path:x.relativePath,sourceMatch:x.sourceMatch}))));
+  assert.equal(navigated.ranking,"curated_alias_path_candidates_then_ast_fts");
+  const scoped=await engine.search({projectId:"ts-pilot",query:businessQuery,
+    repoIds:["training-csharp"],languages:["csharp"],limit:6});
+  assert.ok(scoped.results.every(x=>x.repoId==="training-csharp"&&x.language==="csharp"));
+  const matchedBusiness=await engine.matchFrontendBackend({projectId:"ts-pilot",query:businessQuery});
+  assert.equal(matchedBusiness.activeMockAdapters[0].name,"teachingDevicesService");
+  assert.equal(matchedBusiness.queryResolution.method,"curated_source_locator_alias");
+  assert.ok(matchedBusiness.queryResolution.candidateAliases.includes("teaching-devices"));
+  assert.equal(matchedBusiness.matchedContracts.length,0);
+  assert.deepEqual(matchedBusiness.verifiedRuntimeLinks,[]);
   const contract=await engine.matchFrontendBackend({projectId:"ts-pilot",query:"CourseSubjects"});
   assert.ok(contract.matchedContracts.some(x=>
     x.frontend.httpMethod==="GET"&&x.backend.endpoint==="GET /api/CourseSubjects/{id}"));
@@ -103,6 +121,22 @@ test("FE mock adapter audit never claims runtime backend; HTTP route match stays
   const m=await handler("openclaw_codebase_intelligence",{action:"match",projectId:"ts-pilot",query:"teaching devices"});
   assert.equal(m.structuredContent.result.activeMockAdapters.length,1);
 }));
+test("Vietnamese feature search prioritizes core FE and legacy evidence across repositories",async()=>withProject(async({registry})=>{
+  const engine=createIndexEngine({registry});
+  assert.equal((await complete(engine,"full")).job.state,"completed");
+  const query="thiết bị hỗ trợ giảng dạy theo học phần";
+  const found=await engine.search({projectId:"ts-pilot",query,limit:5});
+  assert.equal(found.results[0].relativePath,"src/app/(admin)/teaching-devices/page.tsx");
+  assert.equal(found.results[1].relativePath,"resources/views/course_books/phones.blade.php");
+  assert.ok(found.results.some(x=>x.relativePath==="src/services/teaching-devices.service.ts"));
+  assert.ok(found.results.every(x=>x.freshness==="verified_current_hash"));
+  assert.ok(found.results.every(x=>x.sourceMatch==="curated_alias_path_candidate"));
+  const matched=await engine.matchFrontendBackend({projectId:"ts-pilot",query});
+  assert.equal(matched.activeMockAdapters.length,1);
+  assert.deepEqual(matched.matchedContracts,[]);
+  assert.deepEqual(matched.verifiedRuntimeLinks,[]);
+},{includePhp:true}));
+
 test("switching mock adapter to HTTP updates facts, removes mock edge and invalidates stale metadata",async()=>withProject(async({registry,fe})=>{
   const engine=createIndexEngine({registry});
   assert.equal((await complete(engine,"full")).job.state,"completed");
@@ -112,6 +146,9 @@ test("switching mock adapter to HTTP updates facts, removes mock edge and invali
   const stale=await engine.typescriptSearch({projectId:"ts-pilot",query:"teachingDevicesService",kinds:["export_binding"]});
   assert.equal(stale.results[0].freshness,"stale_or_unavailable");
   assert.equal(stale.results[0].details,null);
+  const staleNavigation=await engine.search({projectId:"ts-pilot",query:"thiết bị hỗ trợ giảng dạy theo học phần",limit:20});
+  assert.ok(!staleNavigation.results.some(x=>x.relativePath==="src/services/teaching-devices.service.ts" &&
+    x.sourceMatch==="curated_alias_path_candidate"),"Dirty files must never get promoted as verified alias evidence");
   const updated=await complete(engine);
   assert.equal(updated.job.state,"completed",JSON.stringify(updated.job.error));
   assert.equal(updated.index.changed,1);

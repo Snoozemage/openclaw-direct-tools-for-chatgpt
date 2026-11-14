@@ -64,6 +64,11 @@ test("PHP AST index stores routes/models/migrations and connects static evidence
   assert.ok(t.nodes.some(n=>n.kind==="view_render" && n.target==="resources/views/course_books/phones.blade.php"));
   assert.ok(t.nodes.some(n=>n.kind==="view_file" && n.relativePath.endsWith("phones.blade.php")));
   assert.ok(t.edges.some(e=>e.kind==="candidate_view_path" && e.status==="inferred"));
+  const materials=await engine.search({projectId:"php-pilot",
+    query:"Quản lý giáo trình và tài liệu học phần",limit:8});
+  assert.ok(materials.results.some(x=>x.relativePath==="resources/views/course_books/phones.blade.php" &&
+    x.sourceMatch==="curated_alias_path_candidate" && x.freshness==="verified_current_hash"),
+    "Legacy course-books is a navigation candidate, not proof that it matches the business feature");
   const dbOperation=await engine.phpSearch({projectId:"php-pilot",query:"course_subjects",kinds:["table_operation"]});
   assert.ok(dbOperation.results.some(x=>x.details.operation==="update"));
   assert.ok(t.limitations.some(x=>x.includes("credit grain")));

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {selectEvidenceRoots,traverseEvidence,redactStaleGraph,projectC4FromGraph,
+import {selectEvidenceRoots,sourceLocatorAliases,traverseEvidence,redactStaleGraph,projectC4FromGraph,
   projectC1,projectC2,classifyImpact,indexedTestCandidates} from "./graph-projector.mjs";
 import {loadCuratedContext} from "./curated-context.mjs";
 import path from "node:path";
@@ -497,18 +497,67 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
           if(exactSourceFileMatches.length>=limit)break;
         }
       }
-      const ranked=[...exactSourceFileMatches,...results].filter((r,i,a)=>
+      // Curated business phrases only suggest navigation paths; source hashes
+      // must verify before a candidate is shown, and aliases prove no API link.
+      const aliases=sourceLocatorAliases(query).map(s=>s.toLocaleLowerCase("vi").replaceAll("_","-"));
+      const aliasSourceFileMatches=[];
+      if(aliases.length){
+        const paths=db.prepare("SELECT repo_id AS repoId,relative_path AS relativePath,language,sha256 FROM files").all();
+        const fileCandidates=paths.flatMap(file=>{
+          if((repoIds.length&&!repoIds.includes(file.repoId))||
+             (languages.length&&!languages.includes(file.language)))return [];
+          const p=file.relativePath.replaceAll("\\","/").toLocaleLowerCase("vi").replaceAll("_","-");
+          const alias=aliases.find(a=>p.includes(a));
+          if(!alias)return [];
+          const basename=path.basename(p);
+          const stem=basename.replace(/\.(?:blade\.php|php|cs|ts|tsx|sql|json)$/iu,"");
+          const tier=stem===alias?0:p.split("/").includes(alias)?1:2;
+          const role=/\/(?:app|pages)\/.*\/page\.tsx?$/u.test(p)?0:
+            /\/services\//u.test(p)?1:
+            /\/features\/[^/]+\/[^/]+-view\.tsx?$/u.test(p)?2:
+            /\/views\/.*\/index\.blade\.php$/u.test(p)?3:
+            /\/views\//u.test(p)?4:
+            /\/features\/.*\/mocks\//u.test(p)?8:
+            /\/features\/.*\/components\//u.test(p)?9:5;
+          return [{...file,alias,rank:role*10+tier}];
+        }).sort((a,b)=>a.rank-b.rank||a.relativePath.localeCompare(b.relativePath));
+        for(const file of fileCandidates.slice(0,Math.min(60,limit*8))){
+          const root=roots.get(file.repoId);
+          let safe=null;
+          try{
+            const absolute=path.join(root,file.relativePath);
+            const resolved=await import("node:fs/promises").then(fs=>fs.realpath(absolute));
+            safe=await readSafeFile({root,relativePath:file.relativePath,absolutePath:resolved});
+          }catch{}
+          if(safe?.hash!==file.sha256)continue;
+          aliasSourceFileMatches.push({repoId:file.repoId,relativePath:file.relativePath,
+            language:file.language,startLine:1,endLine:Math.min(3,safe.text.split("\n").length),
+            sha256:file.sha256,score:-90,freshness:"verified_current_hash",
+            snippet:safe.text.split("\n").slice(0,3).join("\n").slice(0,400),
+            sourceMatch:"curated_alias_path_candidate",matchedAlias:file.alias});
+        }
+      }
+      // Preserve at least one verified navigation candidate from each relevant repo
+      // before filling with lower-priority files from the same feature.
+      const aliasByRepo=new Map();
+      for(const item of aliasSourceFileMatches){
+        if(!aliasByRepo.has(item.repoId))aliasByRepo.set(item.repoId,item);
+      }
+      const diverseAliasFiles=[...aliasByRepo.values(),...aliasSourceFileMatches].filter((r,i,a)=>
+        a.findIndex(x=>x.repoId===r.repoId&&x.relativePath===r.relativePath)===i);
+      const ranked=[...exactSourceFileMatches,...diverseAliasFiles,...results].filter((r,i,a)=>
         a.findIndex(x=>x.repoId===r.repoId&&x.relativePath===r.relativePath)===i).slice(0,limit);
       return {
         projectId, query, indexRevision: revision.revision, indexedAt: revision.indexed_at,
         repoSnapshots: readRepoSnapshots(db),
         mode: "lexical_fts5", matchMode,
         ranking:exactSourceFileMatches.length?"verified_exact_basename_then_ast_fts":
+          aliasSourceFileMatches.length?"curated_alias_path_candidates_then_ast_fts":
           tsRerank&&tsEvidence.size?"ts_ast_evidence_then_fts":"fts5",
         results:ranked, count: ranked.length,
         staleResults: ranked.filter(x=>x.freshness==="stale_or_unavailable").length,
         truncated: matches.length >= Math.min(160, limit * 6) && results.length >= limit,
-        note: "Lexical FTS5; PHP, C# and TS/Next AST search/trace are separate. HTTP contract matches remain candidates when runtime base URL or adapter selection is not proved; C4 is later."
+        note: "Lexical FTS5; PHP, C# and TS/Next AST search/trace are separate. HTTP contract matches remain candidates when runtime base URL or adapter selection is not proved; C4 is later. Curated alias path matches support source navigation only, not business equivalence or runtime evidence."
       };
     } finally { db?.close(); }
   }
@@ -812,7 +861,8 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
       const mockBindings=await verifyPhpFacts(project,findActiveMockBindings(db,frontendIds,150));
       const normalized=q=>q.toLocaleLowerCase("vi").replace(/[^\p{L}\p{N}]+/gu,"");
       const queryKey=normalized(query);
-      const queryKeys=[queryKey];
+      const aliases=sourceLocatorAliases(query);
+      const queryKeys=[...new Set([queryKey,...aliases.map(normalized)])];
       if(queryKey.endsWith("classes"))queryKeys.push(queryKey.slice(0,-7)+"class");
       // Apply complete anchors to each field independently: joining name+path first could
       // manufacture a false match over the string boundary (e.g. teaching-plan + src).
@@ -861,6 +911,8 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
       return {
         projectId,query,indexRevision:currentRevision(db).revision,
         mode:"frontend_http_contract_candidates",activeMockAdapters:activeAdapters,
+        queryResolution:{method:aliases.length?"curated_source_locator_alias":"literal_source_locator",
+          candidateAliases:aliases,interpretation:"Aliases select indexed source candidates only; they do not prove business or runtime equivalence."},
         httpRequestCandidates:matchingRequests.length,matchedContracts:matches.filter(x=>validBackend.has(x.backend.id)),
         unresolvedRequests:unresolved.slice(0,limit),verifiedRuntimeLinks:[],
         adapterInterpretation:activeAdapters.length?

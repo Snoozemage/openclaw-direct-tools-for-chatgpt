@@ -59,9 +59,11 @@ function readFact(db,lang,id,revision){
   const r=db.prepare("SELECT f.*,fi.sha256 FROM "+facts+" f JOIN files fi ON fi.file_id=f.file_id WHERE f.id=?").get(id);
   return r?fact(r,lang,revision):null;
 }
+export function sourceLocatorAliases(query){
+  return HINTS.find(h=>h.test.test(query))?.terms??[];
+}
 function hintTerms(query){
-  const hints=HINTS.find(h=>h.test.test(query));
-  return [...new Set([query,...(hints?.terms??[])])].slice(0,5);
+  return [...new Set([query,...sourceLocatorAliases(query)])].slice(0,5);
 }
 /**
  * Bounded roots: exact matched symbol/path beats substring. Synonyms only widen
