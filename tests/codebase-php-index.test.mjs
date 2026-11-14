@@ -7,7 +7,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createProjectRegistry } from "../src/tools/codebase-intelligence/registry.mjs";
 import { createIndexEngine } from "../src/tools/codebase-intelligence/engine.mjs";
-import { openExistingIndex } from "../src/tools/codebase-intelligence/store.mjs";
+import { openExistingIndex, openWritableIndex } from "../src/tools/codebase-intelligence/store.mjs";
+import { savePhpAdapterVersion } from "../src/tools/codebase-intelligence/php-graph.mjs";
 import { createCodebaseIntelligenceHandler } from "../src/tools/codebase-intelligence/handler.mjs";
 
 const fixtureRoot=path.join(path.dirname(fileURLToPath(import.meta.url)),"fixtures","codebase-php");
@@ -77,6 +78,42 @@ test("PHP AST index stores routes/models/migrations and connects static evidence
   assert.equal(db.prepare("PRAGMA integrity_check").get().integrity_check,"ok");
   db.close();
 }));
+test("AST readiness flags a stale parser version even when lexical index is ready",async()=>withProject(async({registry,stateRoot})=>{
+  const engine=createIndexEngine({registry});
+  const indexed=await finish(engine,"full");
+  assert.equal(indexed.job.state,"completed");
+  assert.equal(indexed.index.astReady,true);
+  assert.equal(indexed.index.astReadiness.php.state,"ready");
+  const db=await openWritableIndex(path.join(stateRoot,"index"),"php-pilot");
+  savePhpAdapterVersion(db,"obsolete-parser");
+  db.close();
+  const stale=await engine.status("php-pilot");
+  assert.equal(stale.index.state,"ready","Lexical search remains usable");
+  assert.equal(stale.index.astReady,false);
+  assert.equal(stale.index.astReadiness.php.state,"needs_reindex");
+  assert.equal(stale.index.astReadiness.php.indexedVersion,"obsolete-parser");
+}));
+
+test("C3/C4 prioritize the exact Asteroid class over shared TermAsteroids namespace methods",async()=>withProject(async({registry,repo})=>{
+  const enginePath=path.join(repo,"src","Engine");
+  const asteroidPath=path.join(repo,"src","Game","Asteroid");
+  await mkdir(enginePath,{recursive:true});
+  await mkdir(asteroidPath,{recursive:true});
+  const noise=Array.from({length:310},(_,i)=>`public function method${i}(): void {}`).join("\n");
+  await writeFile(path.join(enginePath,"AABox.php"),
+    `<?php namespace Demo\\TermAsteroids\\Engine; class AABox { ${noise} }`);
+  await writeFile(path.join(asteroidPath,"Asteroid.php"),
+    String.raw`<?php namespace Demo\TermAsteroids\Game\Asteroid; class Asteroid { public function launch(): void {} }`);
+  const engine=createIndexEngine({registry});
+  const indexed=await finish(engine,"full");
+  assert.equal(indexed.job.state,"completed",JSON.stringify(indexed.job.error));
+  const g=await engine.evidenceGraph({projectId:"php-pilot",query:"Asteroid",languages:["php"],maxNodes:25});
+  assert.equal(g.rootEvidence[0].kind,"class",JSON.stringify(g.rootEvidence));
+  assert.equal(g.rootEvidence[0].relativePath,"src/Game/Asteroid/Asteroid.php");
+  const c3=await engine.architecture({projectId:"php-pilot",level:"C3",query:"Asteroid",maxNodes:30});
+  assert.equal(c3.nodes[0].label,"PHP module Game / Asteroid",JSON.stringify(c3.nodes));
+}));
+
 test("typed property receiver adds inferred PHP graph edges without guessing untyped calls",async()=>withProject(async({registry,repo})=>{
   const folder=path.join(repo,"src","Game");
   await mkdir(folder,{recursive:true});

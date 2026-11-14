@@ -20,11 +20,29 @@ export async function assertPhpParserReady() {
   }
 }
 
+/** Retry one transient parser process timeout without hiding deterministic errors. */
+export async function extractPhpFactsWithRetry({ timeoutMs = 10000, retryTimeoutMs = 20000, ...args } = {}) {
+  try {
+    return await extractPhpFacts({ ...args, timeoutMs });
+  } catch (error) {
+    if (error?.code !== "PHP_PARSER_TIMEOUT" || args.signal?.aborted) throw error;
+    try {
+      return await extractPhpFacts({ ...args, timeoutMs: retryTimeoutMs });
+    } catch (retryError) {
+      if (retryError instanceof ProjectRegistryError) {
+        throw new ProjectRegistryError(retryError.code,
+          `${retryError.message} One retry after the initial ${timeoutMs} ms timeout also failed.`);
+      }
+      throw retryError;
+    }
+  }
+}
+
 /**
  * Local PHP CLI receives source via stdin, parses it and returns bounded AST facts.
  * NEVER invokes project autoloaders or executes analyzed PHP source.
  */
-export async function extractPhpFacts({ relativePath, source, signal, timeoutMs = 4500 } = {}) {
+export async function extractPhpFacts({ relativePath, source, signal, timeoutMs = 10000 } = {}) {
   if (typeof source !== "string" || Buffer.byteLength(source, "utf8") > MAX_SOURCE ||
       typeof relativePath !== "string" || relativePath.length > 1024 ||
       relativePath.includes("\0") || relativePath.split(/[\\/]/u).includes("..")) {
@@ -41,15 +59,16 @@ export async function extractPhpFacts({ relativePath, source, signal, timeoutMs 
     });
     let output = "";
     let outputBytes = 0;
-    let stderr = "";
     let finished = false;
-    const timeout = setTimeout(() => proc.kill(), timeoutMs);
+    let timedOut = false;
+    let outputExceeded = false;
+    const timeout = setTimeout(() => { timedOut = true; proc.kill(); }, timeoutMs);
     proc.stdout.on("data", (buffer) => {
       outputBytes += buffer.length;
-      if (outputBytes > MAX_OUTPUT) { proc.kill(); return; }
+      if (outputBytes > MAX_OUTPUT) { outputExceeded = true; proc.kill(); return; }
       output += buffer.toString("utf8");
     });
-    proc.stderr.on("data", (buffer) => { stderr += buffer.toString("utf8").slice(0, 240); });
+    proc.stderr.on("data", () => {}); // Drain stderr; do not expose source-dependent CLI output.
     proc.on("error", (error) => {
       if (finished) return;
       finished = true;
@@ -62,9 +81,17 @@ export async function extractPhpFacts({ relativePath, source, signal, timeoutMs 
       finished = true;
       clearTimeout(timeout);
       if (signal?.aborted) { reject(new ProjectRegistryError("INDEX_CANCELLED","PHP parsing cancelled.")); return; }
-      if (exitCode !== 0 || outputBytes > MAX_OUTPUT || sig) {
+      if (timedOut) {
+        reject(new ProjectRegistryError("PHP_PARSER_TIMEOUT", `PHP parser timed out after ${timeoutMs} ms.`));
+        return;
+      }
+      if (outputExceeded) {
+        reject(new ProjectRegistryError("PHP_PARSER_OUTPUT_LIMIT", `PHP parser exceeded ${MAX_OUTPUT} output bytes.`));
+        return;
+      }
+      if (exitCode !== 0 || sig) {
         reject(new ProjectRegistryError("PHP_PARSER_FAILED",
-          "PHP parser process failed, timed out, or exceeded output budget."));
+          `PHP parser exited with code ${exitCode ?? "unknown"}${sig ? ` (signal ${sig})` : ""}.`));
         return;
       }
       try {

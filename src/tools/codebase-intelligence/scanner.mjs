@@ -10,7 +10,7 @@ export const INDEX_LIMITS = Object.freeze({
   maxSourceBytes: 128 * 1024 * 1024,
   maxChunks: 45000,
   maxChunkChars: 1600,
-  maxJobMs: 300_000, // PHP AST first pass adds bounded subprocess parsing on top of file hashing.
+  maxJobMs: 600_000, // Large PHP/C#/TS workspaces need bounded time for full AST adapter upgrades.
 });
 const DISALLOWED_DIRS = new Set([
   ".git", ".next", ".nuxt", ".turbo", "node_modules", "vendor", "obj",

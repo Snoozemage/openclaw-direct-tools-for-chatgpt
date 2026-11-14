@@ -9,7 +9,7 @@ import {
   openWritableIndex, openExistingIndex, readExistingHashes, removeFile,
   insertFile, currentRevision, databaseCounts, recordRevision, searchIndex, writeRepoSnapshots, readRepoSnapshots,
 } from "./store.mjs";
-import { extractPhpFacts, assertPhpParserReady, PHP_ADAPTER_VERSION } from "./php-parser.mjs";
+import { extractPhpFactsWithRetry, assertPhpParserReady, PHP_ADAPTER_VERSION } from "./php-parser.mjs";
 import { extractBladeFacts } from "./php-blade.mjs";
 import { extractTypescriptFacts,assertTypescriptReady,TYPESCRIPT_ADAPTER_VERSION,normalizeHttpPath } from "./typescript-parser.mjs";
 import {readTsAdapterVersion,saveTsAdapterVersion,insertTsFacts,rebuildTsEdges,getTsCounts,
@@ -69,7 +69,15 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
     if (file.relativePath.toLowerCase().endsWith(".blade.php")) {
       return {facts:extractBladeFacts(safe.text,file.relativePath),parseError:null};
     }
-    return extractPhpFacts({relativePath:file.relativePath,source:safe.rawText,signal});
+    try {
+      return await extractPhpFactsWithRetry({relativePath:file.relativePath,source:safe.rawText,signal});
+    } catch (error) {
+      if (error instanceof ProjectRegistryError && error.code !== "INDEX_CANCELLED") {
+        throw new ProjectRegistryError(error.code,
+          `PHP AST failed for ${file.repoId}:${file.relativePath}: ${error.message}`);
+      }
+      throw error;
+    }
   }
 
   function retain(job) {
@@ -145,6 +153,7 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
       const found = new Set();
       const started = Date.now();
       for (const file of inventory.files) {
+        job.progress.currentFile = { repoId: file.repoId, relativePath: file.relativePath };
         if (job.controller.signal.aborted) reject("INDEX_CANCELLED", "Indexing was cancelled.");
         if (Date.now() - started > limits.maxJobMs) reject("INDEX_TIMEOUT", "Indexing exceeded the time budget.");
         const id = file.repoId + ":" + file.relativePath;
@@ -168,6 +177,7 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
           if(isCsharp && csharpReparseAll)await queueCsharp(file,safe.rawText);
           if(isTypescript && typescriptReparseAll)parseTsFile(file,safe);
           if (isPhp && phpReparseAll) {
+            job.progress.phase = "php_parsing";
             const result = await parsePhpFile(file,safe,job.controller.signal);
             insertPhpFileFacts(db, file, result.facts, result.parseError);
             phpParsed++;
@@ -183,6 +193,7 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
         if(isCsharp)await queueCsharp(file,safe.rawText);
         if(isTypescript)parseTsFile(file,safe);
         if (isPhp) {
+          job.progress.phase = "php_parsing";
           const result = await parsePhpFile(file,safe,job.controller.signal);
           insertPhpFileFacts(db, file, result.facts, result.parseError);
           phpParsed++;
@@ -197,6 +208,7 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
         }
       }
       await flushCsharp();
+      delete job.progress.currentFile;
       if (job.mode !== "full") {
         for (const oldId of old.keys()) {
           if (!found.has(oldId)) { removeFile(db, oldId); removed++; }
@@ -253,6 +265,7 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
         try { db.exec("ROLLBACK"); } catch {}
       }
       job.state = isCancelled(error, job) ? "cancelled" : "failed";
+      job.progress.phase = job.state;
       job.error = {
         code: job.state === "cancelled" ? "INDEX_CANCELLED"
           : error instanceof ProjectRegistryError ? error.code : "INDEX_FAILED",
@@ -296,6 +309,7 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
     validateProjectId(projectId);
     if(typeof checkWorktree!=="boolean")reject("INVALID_ARGUMENTS","checkWorktree must be boolean.");
     const projectStatus = await registry.status(projectId);
+    const project = await registry.ensureProjectAllowed(projectId);
     let revision = null;
     let repoSnapshots = [];
     let php = null;
@@ -316,7 +330,6 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
     } finally { db?.close(); }
     let gitSnapshotDrift=null;
     if(checkWorktree&&revision){
-      const project=await registry.ensureProjectAllowed(projectId);
       const actual=await snapshotRepositories(project);
       const oldById=new Map(repoSnapshots.map(x=>[x.repoId,x]));
       gitSnapshotDrift=actual.map(now=>{
@@ -329,6 +342,16 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
           drift:reasons.length>0,reasons};
       });
     }
+    const astReadiness = Object.fromEntries([
+      ["php", php?.adapterVersion, PHP_ADAPTER_VERSION],
+      ["csharp", csharp?.adapterVersion, CSHARP_ADAPTER_VERSION],
+      ["typescript", typescript?.adapterVersion, TYPESCRIPT_ADAPTER_VERSION],
+    ].filter(([lang]) => project.repositories.some(repo => repo.languages.includes(lang)))
+      .map(([lang, indexedVersion, expectedVersion]) => [lang, {
+        state: indexedVersion === expectedVersion ? "ready" : "needs_reindex",
+        indexedVersion: indexedVersion ?? null, expectedVersion,
+      }]));
+    const astReady = Object.values(astReadiness).every(item => item.state === "ready");
     const activeJob = active.get(projectId);
     const requested = jobId ? jobs.get(jobId) : null;
     if (jobId && (!requested || requested.projectId !== projectId)) {
@@ -342,6 +365,7 @@ export function createIndexEngine({ registry, indexRoot = path.join(registry?.st
         fileCount: revision.file_count, chunkCount: revision.chunk_count, sourceBytes: revision.source_bytes,
         changed: revision.changed, removed: revision.removed, unchanged: revision.unchanged,
         freshness: "not_checked_against_worktree", repoSnapshots, php,csharp,typescript,
+        astReady, astReadiness,
         ...(checkWorktree?{gitSnapshotDrift,
           snapshotRefreshRecommended:gitSnapshotDrift.some(x=>x.drift),
           snapshotCheckLimitations:"Git branch/HEAD checked only. Uncommitted content edits need incremental reindex; source snippets and AST claims are separately hash-verified."}:{}),

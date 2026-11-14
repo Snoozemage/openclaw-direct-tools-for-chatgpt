@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractPhpFacts, assertPhpParserReady } from "../src/tools/codebase-intelligence/php-parser.mjs";
+import { extractPhpFacts, extractPhpFactsWithRetry, assertPhpParserReady } from "../src/tools/codebase-intelligence/php-parser.mjs";
 
 const routes=String.raw`<?php
 use Illuminate\Support\Facades\Route;
@@ -102,6 +102,23 @@ class Pilot {
   assert.ok(calls.some(x=>x.details.receiverEvidence==="declared_property_type"));
   assert.ok(calls.some(x=>x.details.receiverEvidence==="typed_parameter"));
   assert.ok(!calls.some(x=>x.name.includes("unknown")));
+});
+test("PHP parser timeout reports an actionable cause", async () => {
+  await assert.rejects(
+    () => extractPhpFacts({relativePath:"routes/web.php",source:routes,timeoutMs:1}),
+    (error) => error.code === "PHP_PARSER_TIMEOUT" && /timed out after 1 ms/u.test(error.message),
+  );
+});
+test("PHP parser retries a transient timeout once and preserves AST facts", async () => {
+  const result=await extractPhpFactsWithRetry({relativePath:"routes/web.php",source:routes,
+    timeoutMs:1,retryTimeoutMs:10000});
+  assert.equal(result.parseError,null);
+  assert.ok(result.facts.some(f=>f.kind==="route"));
+  await assert.rejects(
+    () => extractPhpFactsWithRetry({relativePath:"routes/web.php",source:routes,
+      timeoutMs:1,retryTimeoutMs:1}),
+    (error) => error.code==="PHP_PARSER_TIMEOUT" && /One retry after/u.test(error.message),
+  );
 });
 test("syntax failures are explicit and never turn into fake verified facts", async () => {
   const r=await extractPhpFacts({relativePath:"routes/broken.php",source:"<?php if ("});

@@ -76,26 +76,43 @@ export function selectEvidenceRoots(db,query,{repoIds=[],languages=["php","cshar
     const where=repoIds.length?" AND f.repo_id IN ("+repoIds.map(()=>"?").join(",")+")":"";
     for(const needle of needles){
       if(!needle.literal.trim())continue;
+      const literal=needle.literal.toLocaleLowerCase("vi");
+      // SQL candidate bounding must promote precise suffix/path matches first;
+      // otherwise a shared namespace (e.g. TermAsteroids) fills LIMIT 280.
+      const suffix=quotedLike(literal).slice(0,-1);
       const sql="SELECT f.*,fi.sha256 FROM "+table+" f JOIN files fi ON fi.file_id=f.file_id "+
-        "WHERE (LOWER(f.name) LIKE ? ESCAPE '!' OR LOWER(f.relative_path) LIKE ? ESCAPE '!')"+where+" LIMIT 280";
-      const rows=db.prepare(sql).all(quotedLike(needle.literal.toLocaleLowerCase("vi")),
-        quotedLike(needle.literal.toLocaleLowerCase("vi")),...repoIds);
+        "WHERE (LOWER(f.name) LIKE ? ESCAPE '!' OR LOWER(f.relative_path) LIKE ? ESCAPE '!')"+where+
+        " ORDER BY CASE WHEN LOWER(f.name)=? THEN 0 "+
+        "WHEN LOWER(f.name) LIKE ? ESCAPE '!' THEN 1 "+
+        "WHEN LOWER(f.relative_path) LIKE ? ESCAPE '!' THEN 2 ELSE 3 END, "+
+        "CASE WHEN f.kind IN ('class','controller','next_page','next_api_route') THEN 0 ELSE 1 END, "+
+        "f.relative_path,f.start_line LIMIT 280";
+      const rows=db.prepare(sql).all(quotedLike(literal),quotedLike(literal),...repoIds,
+        literal,suffix,suffix);
       for(const r of rows){
         const current=fact(r,lang,revision);
         const k=current.internalKey;
-        const n=ident(current.name),p=ident(current.relativePath);
-        const exact=n===ident(query)?0:n===needle.flat?1:2;
-        const score=exact*100+(PRIORITY[current.kind]??30)+
+        const n=ident(current.name),p=ident(current.relativePath),queryFlat=ident(query);
+        const leaf=ident(current.name.split(/[\\/@:#.]/u).at(-1));
+        const fileStem=ident(current.relativePath.split("/").at(-1)
+          .replace(/\.(?:blade\.php|php|cs|ts|tsx)$/iu,""));
+        const exactPath=current.relativePath.toLocaleLowerCase("vi")===
+          query.trim().replaceAll("\\","/").toLocaleLowerCase("vi");
+        const tier=n===queryFlat?0:leaf===queryFlat?10:exactPath?20:
+          fileStem===queryFlat?40:200;
+        const score=tier+(PRIORITY[current.kind]??30)+
           (n.includes(needle.flat)?0:p.includes(needle.flat)?10:25)+
           (current.kind==="module"?5:0);
         const previous=found.get(k);
-        if(!previous||previous.score>score)found.set(k,{fact:current,score});
+        if(!previous||previous.score>score)found.set(k,{fact:current,score,tier});
       }
     }
   }
-  return [...found.values()].sort((a,b)=>a.score-b.score||
-    a.fact.relativePath.localeCompare(b.fact.relativePath)||a.fact.startLine-b.fact.startLine)
-    .slice(0,limit).map(x=>x.fact);
+  const ranked=[...found.values()].sort((a,b)=>a.score-b.score||
+    a.fact.relativePath.localeCompare(b.fact.relativePath)||a.fact.startLine-b.fact.startLine);
+  // An exact symbol/path locator should not be diluted by incidental namespace hits.
+  const strong=ranked.some(x=>x.tier<=40);
+  return (strong?ranked.filter(x=>x.tier<=40):ranked).slice(0,limit).map(x=>x.fact);
 }
 export function traverseEvidence(db,roots,{direction="downstream",maxDepth=5,maxNodes=75,maxEdges=380,revision=0,focus=null}={}){
   const focusKey=typeof focus==="string"?ident(focus):"";
