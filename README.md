@@ -12,7 +12,7 @@
 
 **Works with ChatGPT Free - no paid ChatGPT subscription or OpenClaw Main Agent required.**
 
-**Platform status:** Windows is the currently tested setup. Linux and macOS support has not yet been validated. Contributions and testing reports for additional platforms are welcome. See [Contributing](CONTRIBUTING.md).
+**Platform status:** Windows is the established setup. **Linux/Fedora support is experimental** (Node.js bridge, systemd user services, Secret Service tunnel credentials and Chrome/Chromium discovery); it has automated tests but has not yet been verified on a Fedora host. macOS remains unvalidated. See [Linux setup](docs/LINUX.md) and [Contributing](CONTRIBUTING.md).
 
 ChatGPT can read and edit local files, run commands and tests, automate Chrome and Windows desktop applications, and discover other eligible tools in your OpenClaw runtime.
 
@@ -61,7 +61,9 @@ Tool availability depends on the OpenClaw runtime version, installed plugins, pa
 
 4. **Connect ChatGPT.** Add a custom MCP server using the **Tunnel** connection, select the same tunnel, then open a conversation and select the plugin. The local call monitor is available at [http://127.0.0.1:19002/monitor](http://127.0.0.1:19002/monitor) with the default port.
 
-For the full setup flow, workspace requirements, troubleshooting notes, and lifecycle details, continue to [Setup and operation](#setup-and-operation).
+**Quick Start (Linux/Fedora, experimental):** Install OpenClaw and its Gateway service, Node.js 22.17+, npm, ripgrep, `secret-tool` (Fedora: `sudo dnf install libsecret`), and the official Linux tunnel-client. On the `feat/linux-support` branch, run `npm run setup`, `npm start`, then `npm run status`. See [the Linux guide](docs/LINUX.md) for credentials, dependencies, service management, limitations, and the branch's remote availability.
+
+For the full Windows setup flow, workspace requirements, troubleshooting notes, and lifecycle details, continue to [Setup and operation](#setup-and-operation).
 
 ## Architecture
 
@@ -98,9 +100,9 @@ For implementation guidance, see [Tool Exposure Guide](docs/TOOL_EXPOSURE_GUIDE.
 
 ### Requirements
 
-- Setup and lifecycle scripts currently require **Windows and PowerShell**; Linux and macOS have not been validated.
+- **Windows:** PowerShell setup/service/tray scripts. **Linux (experimental):** systemd user services, `secret-tool` and the dedicated [Linux setup guide](docs/LINUX.md). macOS is not supported by lifecycle scripts.
 - Node.js **22.17 or later** and npm.
-- `rg.exe` (ripgrep) on `PATH`, or set `OPENCLAW_RIPGREP_PATH` to its executable path.
+- `rg` (ripgrep) on `PATH` (`rg.exe` on Windows), or set `OPENCLAW_RIPGREP_PATH` to its executable path.
 - An installed and configured OpenClaw runtime and Gateway.
 - An OpenAI Secure MCP Tunnel created in Platform, an **OpenAI Platform API key for `tunnel-client`** with Tunnels Read + Use permission, and a ChatGPT account/workspace that supports custom MCP servers.
 
@@ -108,13 +110,13 @@ For implementation guidance, see [Tool Exposure Guide](docs/TOOL_EXPOSURE_GUIDE.
 
 1. Open [OpenAI Platform Tunnels settings](https://platform.openai.com/settings/organization/tunnels) and create a Secure MCP Tunnel. Note its `tunnel_id` and associate the tunnel with the ChatGPT workspace where the connector will be created. A tunnel attached only to a Platform organization may not appear in a separate ChatGPT workspace.
 2. Create or select an **OpenAI Platform API key** for the tunnel client. This key authenticates `tunnel-client` to OpenAI's tunnel control plane; it is required even though the MCP bridge itself runs locally. Grant it **Tunnels Read + Use** so it can run the tunnel and select it for the ChatGPT connection. Creating or editing the tunnel requires **Tunnels Read + Manage** for the account performing that operation.
-3. The API key for `tunnel-client` is separate from your ChatGPT sign-in and from the authentication setting on the ChatGPT custom MCP plugin. The setup wizard prompts for the key using hidden input and stores it in **Windows Credential Manager**. It is not saved as a plaintext key file. Do not paste it into ChatGPT, put it in the repository, or commit it to Git.
+3. The API key for `tunnel-client` is separate from your ChatGPT sign-in and from the authentication setting on the ChatGPT custom MCP plugin. The setup wizard uses hidden input and stores it in **Windows Credential Manager** (Windows) or **Secret Service/GNOME Keyring** (Linux). It is not saved as a plaintext key file. Do not paste it into ChatGPT, put it in the repository, or commit it to Git.
 
 See the official [Secure MCP Tunnel guide](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) for organization/workspace associations and permissions.
 
 ### Configure the bridge
 
-From the repository root, run the setup wizard in PowerShell:
+For **Windows**, run the setup wizard in PowerShell (for Linux, follow [docs/LINUX.md](docs/LINUX.md)):
 
 ```powershell
 npm run setup
@@ -140,9 +142,9 @@ npm run status
 npm stop
 ```
 
-`npm start` starts the Gateway, MCP bridge, Secure MCP Tunnel, and tray. `npm run status` reports component health; `npm stop` stops the complete stack. The bridge normally listens on `http://127.0.0.1:19002`, with the local Monitor at `http://127.0.0.1:19002/monitor`; the Gateway defaults to port `19001`. Configured ports may differ.
+On **Windows**, `npm start` starts the Gateway, MCP bridge, Secure MCP Tunnel, and tray; `npm stop` stops the stack. On **Linux**, the same commands start/stop bridge and tunnel **user units**, with Gateway managed separately by OpenClaw and no tray. `npm run status` reports component health. The bridge defaults to `http://127.0.0.1:19002` and the Monitor to `http://127.0.0.1:19002/monitor`; the Gateway defaults to port `19001` for the Windows setup and typically `18789` for Linux. Configured ports may differ.
 
-**Automatic startup is opt-in:** Run `npm run autostart:install` to add one **OpenClaw Direct Tools** entry to Windows Startup apps. Enable or disable it in **Task Manager → Startup apps**. Run `npm run autostart:uninstall` to remove it; add `-- -StopService` to stop the running stack as part of uninstall.
+**Automatic startup is opt-in:** On Windows, run `npm run autostart:install` to add one **OpenClaw Direct Tools** entry to Windows Startup apps. On Linux, this enables the bridge and tunnel user units at login (see [Linux setup](docs/LINUX.md)). Enable or disable it in **Task Manager → Startup apps**. Run `npm run autostart:uninstall` to remove it; add `-- -StopService` to stop the running stack as part of uninstall.
 
 ### Windows lifecycle
 
@@ -283,7 +285,7 @@ Static checks cover JavaScript and PowerShell syntax plus selected architecture/
 
 - **Keep endpoints local.** The bridge and monitor default to loopback. Do not expose them to an untrusted network.
 - **Keep secrets out of Git.** API keys, generated runtime configuration, tunnel profiles, logs, and process state belong outside the repository.
-- **Use the OS credential store for runtime keys.** Windows setup stores the tunnel API key in Credential Manager and passes it to `tunnel-client` through the child process environment. This protects the key at rest better than a plaintext file, but does not protect it from malicious code running as the same user while the tunnel process is active.
+- **Use the OS credential store for runtime keys.** Windows setup uses Credential Manager; Linux setup uses Secret Service/GNOME Keyring. Each passes the tunnel API key to `tunnel-client` through the child process environment. This protects the key at rest better than a plaintext file, but does not protect it from malicious code running as the same user while the tunnel process is active.
 - **Treat monitor output as sensitive.** Tool arguments and results may contain private page or machine data, even with best-effort redaction.
 - **Respect native permissions.** Direct invocation is not a permission bypass. OpenClaw policy, tool availability, node pairing/approval, browser attachment, and OS permissions remain authoritative.
 - **Use incremental tool exposure.** Inspect live schemas before invoking discovered tools. Preserve native errors instead of manufacturing success, and obtain approval before destructive or externally consequential actions unless clearly authorized.

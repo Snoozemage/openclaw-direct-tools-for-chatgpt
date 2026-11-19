@@ -4,16 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\setup.ps1",
-    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\service-start.ps1",
-    "stop": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\service-stop.ps1",
-    "autostart:install": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\install-autostart.ps1",
-    "autostart:uninstall": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\uninstall-autostart.ps1",
-    "status": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\windows\\status.ps1",
-    "test": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tests\\smoke.ps1",
-    "test:unit": "node --test .\\tests\\*.test.mjs",
-    "check": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tests\\check-syntax.ps1",
-    "test:credential-store": "powershell -NoProfile -ExecutionPolicy Bypass -File .\\tests\\windows-credential-store.ps1"
+    "setup": "node scripts/platform.mjs setup",
+    "start": "node scripts/platform.mjs start",
+    "stop": "node scripts/platform.mjs stop",
+    "autostart:install": "node scripts/platform.mjs autostart:install",
+    "autostart:uninstall": "node scripts/platform.mjs autostart:uninstall",
+    "status": "node scripts/platform.mjs status",
+    "test": "node scripts/platform.mjs test",
+    "test:unit": "node --import ./tests/test-environment.mjs --test tests/*.test.mjs",
+    "check": "node scripts/platform.mjs check",
+    "test:credential-store": "node scripts/platform.mjs test:credential-store"
   },
   "engines": {
     "node": ">=22.17"
