@@ -98,6 +98,7 @@ class TrayCompanion:
         self.config = None
         self.config_signature = None
         self.monitor_url = None
+        self.last_monitor_click_at = 0
         self.startup_grace_until = time.monotonic() + 300
         self.ever_ready = False
         self.ready_was_shown = False
@@ -363,8 +364,14 @@ class TrayCompanion:
             QDesktopServices.openUrl(QUrl(self.monitor_url))
 
     def on_tray_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            self.open_monitor()
+        if reason not in (QSystemTrayIcon.ActivationReason.Trigger,
+                          QSystemTrayIcon.ActivationReason.DoubleClick):
+            return
+        now = time.monotonic()
+        if now - self.last_monitor_click_at < 0.5:
+            return
+        self.last_monitor_click_at = now
+        self.open_monitor()
 
     def _run_systemctl(self, args, on_success):
         process = QProcess(self.app)

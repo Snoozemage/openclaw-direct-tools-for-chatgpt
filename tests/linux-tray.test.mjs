@@ -16,7 +16,7 @@ test("Linux Qt tray reproduces status colors and Windows menu labels", (t) => {
 import importlib.util
 import tempfile
 from pathlib import Path
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 source = Path("scripts/linux/tray.py")
 spec = importlib.util.spec_from_file_location("openclaw_linux_tray", source)
@@ -52,6 +52,17 @@ with tempfile.TemporaryDirectory() as temp:
                  "Stop OpenClaw Direct Tools", "Exit tray app"):
         assert item in labels, (item, labels)
     assert companion.last_state == "CONFIG MISSING"
+    opened = []
+    companion.open_monitor = lambda: opened.append("monitor")
+    companion.on_tray_activated(QSystemTrayIcon.ActivationReason.Context)
+    assert opened == [], "Right-click must keep its context menu"
+    companion.on_tray_activated(QSystemTrayIcon.ActivationReason.Trigger)
+    assert opened == ["monitor"], "Single left-click should open Monitor"
+    companion.on_tray_activated(QSystemTrayIcon.ActivationReason.DoubleClick)
+    assert opened == ["monitor"], "Double-click must not open Monitor twice"
+    companion.last_monitor_click_at = 0
+    companion.on_tray_activated(QSystemTrayIcon.ActivationReason.DoubleClick)
+    assert opened == ["monitor", "monitor"], "Double-click remains supported"
     companion.cleanup()
 app.quit()
 `;
