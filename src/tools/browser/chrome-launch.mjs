@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join, posix } from "node:path";
+import { posix, win32 } from "node:path";
 import { homedir } from "node:os";
 import { execFile as execFileCallback, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -15,9 +15,9 @@ export function chromeLaunchCandidates(env = process.env, platform = process.pla
   ].filter(Boolean);
   if (platform !== "win32") return [];
   return [
-    env.PROGRAMFILES && join(env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
-    env["PROGRAMFILES(X86)"] && join(env["PROGRAMFILES(X86)"], "Google", "Chrome", "Application", "chrome.exe"),
-    env.LOCALAPPDATA && join(env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"),
+    env.PROGRAMFILES && win32.join(env.PROGRAMFILES, "Google", "Chrome", "Application", "chrome.exe"),
+    env["PROGRAMFILES(X86)"] && win32.join(env["PROGRAMFILES(X86)"], "Google", "Chrome", "Application", "chrome.exe"),
+    env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"),
   ].filter(Boolean);
 }
 
@@ -29,9 +29,9 @@ export async function resolveChromeLaunchConfig({ env = process.env, exists = ex
   if (!executable) throw new Error("Could not locate Chrome or Chromium. Set OPENCLAW_CHROME_PATH to its executable.");
 
   const isChromium = platform === "linux" && /chromium/u.test(executable);
-  const path = platform === "linux" ? posix : { join };
+  const path = platform === "linux" ? posix : win32;
   const userDataDir = platform === "win32"
-    ? join(env.LOCALAPPDATA || "", "Google", "Chrome", "User Data")
+    ? win32.join(env.LOCALAPPDATA || "", "Google", "Chrome", "User Data")
     : (env.OPENCLAW_CHROME_USER_DATA_DIR || path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), isChromium ? "chromium" : "google-chrome"));
   const localStatePath = path.join(userDataDir, "Local State");
   let profileDirectory = "Default";

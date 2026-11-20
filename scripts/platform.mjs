@@ -12,6 +12,8 @@ const windowsScripts = {
   "autostart:install": "scripts/windows/install-autostart.ps1",
   "autostart:uninstall": "scripts/windows/uninstall-autostart.ps1",
   status: "scripts/windows/status.ps1",
+  "bridge:restart": "scripts/windows/restart-bridge.ps1",
+  logs: "scripts/windows/logs.ps1",
   test: "tests/smoke.ps1",
   check: "tests/check-syntax.ps1",
   "test:credential-store": "tests/windows-credential-store.ps1",
@@ -21,11 +23,6 @@ function run(command, args) {
   const result = spawnSync(command, args, { cwd: repoRoot, stdio: "inherit", env: process.env });
   if (result.error) throw result.error;
   process.exit(result.status ?? 1);
-}
-
-if (action === "test:credential-store" && process.platform !== "win32") {
-  console.error("Windows Credential Manager tests are Windows-only; Linux uses Secret Service.");
-  process.exit(1);
 }
 
 if (action === "test" && process.platform === "linux") {
@@ -53,7 +50,8 @@ if (action === "test" && process.platform === "linux") {
   if (!windowsScripts[action]) throw new Error("Unknown command: " + action);
   run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", resolve(repoRoot, windowsScripts[action])]);
 } else if (process.platform === "linux") {
-  const supported = ["setup", "start", "stop", "status", "autostart:install", "autostart:uninstall"];
+  const supported = ["setup", "start", "stop", "status", "autostart:install", "autostart:uninstall",
+    "bridge:restart", "logs", "test:credential-store"];
   if (!supported.includes(action)) throw new Error("Unknown command: " + action);
   run(process.execPath, [resolve(repoRoot, "scripts/linux/manage.mjs"), action]);
 } else {

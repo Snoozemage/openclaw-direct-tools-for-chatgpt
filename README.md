@@ -12,7 +12,7 @@
 
 **Works with ChatGPT Free - no paid ChatGPT subscription or OpenClaw Main Agent required.**
 
-**Platform status:** Windows is the established setup. **Linux/Fedora support is experimental** (Node.js bridge, systemd user services, Secret Service tunnel credentials and Chrome/Chromium discovery); it has automated tests but has not yet been verified on a Fedora host. macOS remains unvalidated. See [Linux setup](docs/LINUX.md) and [Contributing](CONTRIBUTING.md).
+**Platform status:** Windows is the established setup. **Linux/Fedora support is under active development** (Node.js bridge, systemd user services, Secret Service tunnel credentials and Chrome/Chromium discovery); its Gateway, Bridge, Tunnel and KDE Polkit integration have been validated on Fedora 45 KDE. macOS remains unvalidated. See [Linux setup](docs/LINUX.md) and [Contributing](CONTRIBUTING.md).
 
 ChatGPT can read and edit local files, run commands and tests, automate Chrome and Windows desktop applications, and discover other eligible tools in your OpenClaw runtime.
 
@@ -33,6 +33,7 @@ Rather than routing every operation through the OpenClaw Main Agent, ChatGPT can
 | File operations | `openclaw_ls`, `openclaw_read`, `openclaw_edit`, `openclaw_write`, `openclaw_apply_patch` | Explore, read, create, and update local files. |
 | Local project search | `openclaw_glob`, `openclaw_grep` | Find files and locate text across your projects. |
 | Runtime operations | `openclaw_exec`, `openclaw_process` | Run commands and tests, and follow longer-running tasks. |
+| Linux administration | `openclaw_admin` | Run user-authorized root commands through KDE Polkit. |
 | Screenshot presentation | `openclaw_image_render` | View screenshots of your desktop directly in ChatGPT. |
 | Additional OpenClaw tools | `openclaw_tool_search`, `openclaw_tool_describe`, `openclaw_dispatch_action` | Discover and use other available tools in your OpenClaw setup. |
 
@@ -61,7 +62,9 @@ Tool availability depends on the OpenClaw runtime version, installed plugins, pa
 
 4. **Connect ChatGPT.** Add a custom MCP server using the **Tunnel** connection, select the same tunnel, then open a conversation and select the plugin. The local call monitor is available at [http://127.0.0.1:19002/monitor](http://127.0.0.1:19002/monitor) with the default port.
 
-**Quick Start (Linux/Fedora, experimental):** Install OpenClaw and its Gateway service, Node.js 22.17+, npm, ripgrep, `secret-tool` (Fedora: `sudo dnf install libsecret`), and the official Linux tunnel-client. On the `feat/linux-support` branch, run `npm run setup`, `npm start`, then `npm run status`. See [the Linux guide](docs/LINUX.md) for credentials, dependencies, service management, limitations, and the branch's remote availability.
+**Quick Start (Linux/Fedora):** Install OpenClaw and its Gateway service, Node.js 22.17+, npm, ripgrep, `secret-tool` (Fedora: `sudo dnf install libsecret`), and the official Linux tunnel-client. On the `feat/linux-bridge-support` branch, run `npm run setup`, `npm start`, then `npm run status`. See [the Linux guide](docs/LINUX.md) for credentials, dependencies, service management, limitations, and the branch's remote availability.
+
+On Fedora KDE, `openclaw_admin` runs user-authorized root commands with a purpose notification and Polkit authentication when needed. See [Linux administrative actions](docs/LINUX.md#administrative-actions-kde-and-passwords).
 
 For the full Windows setup flow, workspace requirements, troubleshooting notes, and lifecycle details, continue to [Setup and operation](#setup-and-operation).
 
@@ -100,7 +103,7 @@ For implementation guidance, see [Tool Exposure Guide](docs/TOOL_EXPOSURE_GUIDE.
 
 ### Requirements
 
-- **Windows:** PowerShell setup/service/tray scripts. **Linux (experimental):** systemd user services, `secret-tool` and the dedicated [Linux setup guide](docs/LINUX.md). macOS is not supported by lifecycle scripts.
+- **Windows:** PowerShell setup/service/tray scripts. **Linux (Fedora 45 verified):** systemd user services, `secret-tool` and the dedicated [Linux setup guide](docs/LINUX.md). macOS is not supported by lifecycle scripts.
 - Node.js **22.17 or later** and npm.
 - `rg` (ripgrep) on `PATH` (`rg.exe` on Windows), or set `OPENCLAW_RIPGREP_PATH` to its executable path.
 - An installed and configured OpenClaw runtime and Gateway.
@@ -144,7 +147,7 @@ npm stop
 
 On **Windows**, `npm start` starts the Gateway, MCP bridge, Secure MCP Tunnel, and tray; `npm stop` stops the stack. On **Linux**, the same commands start/stop bridge and tunnel **user units**, with Gateway managed separately by OpenClaw and no tray. `npm run status` reports component health. The bridge defaults to `http://127.0.0.1:19002` and the Monitor to `http://127.0.0.1:19002/monitor`; the Gateway defaults to port `19001` for the Windows setup and typically `18789` for Linux. Configured ports may differ.
 
-**Automatic startup is opt-in:** On Windows, run `npm run autostart:install` to add one **OpenClaw Direct Tools** entry to Windows Startup apps. On Linux, this enables the bridge and tunnel user units at login (see [Linux setup](docs/LINUX.md)). Enable or disable it in **Task Manager → Startup apps**. Run `npm run autostart:uninstall` to remove it; add `-- -StopService` to stop the running stack as part of uninstall.
+**Automatic startup is opt-in:** On Windows, run `npm run autostart:install` to add one **OpenClaw Direct Tools** entry to Windows Startup apps. On Linux, this enables the bridge and tunnel user units at login (see [Linux setup](docs/LINUX.md)); on Windows the startup entry is managed in **Task Manager → Startup apps**. Run `npm run autostart:uninstall` to disable it; the Windows-only `-- -StopService` flag also stops the running Windows stack.
 
 ### Windows lifecycle
 

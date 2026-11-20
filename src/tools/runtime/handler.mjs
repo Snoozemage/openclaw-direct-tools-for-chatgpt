@@ -46,7 +46,11 @@ async function createNativeToolMap() {
   }
   const configPath = process.env.OPENCLAW_CONFIG_PATH;
   if (!configPath) throw new Error("OPENCLAW_CONFIG_PATH is not configured.");
-  const config = JSON.parse(await readFile(configPath, "utf8"));
+  // The native tool factory depends on a prepared runtime snapshot (exec approvals,
+  // tool policies). Parsing openclaw.json alone leaves readRuntimeConfig() uninitialized.
+  const snapshotPath = path.join(distPath, "plugin-sdk", "runtime-config-snapshot.js");
+  const { captureRuntimeConfigAsyncReader } = await import(pathToFileURL(snapshotPath).href);
+  const config = await captureRuntimeConfigAsyncReader()();
   const tools = await factory({
     config,
     agentId,
@@ -54,7 +58,7 @@ async function createNativeToolMap() {
     sessionKey: "agent:" + agentId + ":openclaw-runtime-tool-wrapper",
   });
   const byName = new Map(Array.isArray(tools) ? tools.map((tool) => [tool.name, tool]) : []);
-  for (const name of nativeNames.values()) {
+  for (const name of ["exec", "process"]) {
     if (typeof byName.get(name)?.execute !== "function") {
       throw new Error("OpenClaw runtime did not construct an executable native tool: " + name);
     }

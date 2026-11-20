@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -97,6 +98,18 @@ function defaultCliPath() {
     const real = realpathSync(cli);
     if (/\.m?js$/iu.test(real)) return real;
   }
+  // Recent OpenClaw installers keep a private Node.js toolchain rather than an npm-global CLI.
+  const toolchainDir = join(homedir(), ".openclaw", "tools");
+  if (existsSync(toolchainDir)) {
+    const toolchains = readdirSync(toolchainDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && /^node-v\d+/u.test(entry.name))
+      .map((entry) => entry.name)
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+    for (const toolchain of toolchains) {
+      const candidate = join(toolchainDir, toolchain, "lib", "node_modules", "openclaw", "openclaw.mjs");
+      if (existsSync(candidate)) return candidate;
+    }
+  }
   const npm = executable("npm");
   if (npm) {
     const result = command(npm, ["root", "-g"], { quiet: true, allowFailure: true });
@@ -189,7 +202,10 @@ async function setup() {
   await installUnit("bridge", nodePath);
   await installUnit("tunnel", nodePath);
   command("systemctl", ["--user", "daemon-reload"]);
-  command("npm", ["ci"]);
+  // The standalone OpenClaw Node toolchain may not be on the service PATH.
+  const bundledNpm = join(dirname(process.execPath), "..", "lib", "node_modules", "npm", "bin", "npm-cli.js");
+  if (existsSync(bundledNpm)) command(process.execPath, [bundledNpm, "ci"]);
+  else command(requirePath(executable("npm"), "npm executable"), ["ci"]);
   console.log("Linux setup complete. No API key is stored in the repository or config.json.");
   console.log("Run npm start. Optional login startup: npm run autostart:install.");
 }
@@ -212,26 +228,54 @@ async function start() {
 
 async function status() {
   const config = await readLinuxConfig(paths.configPath);
+  const gateway = command("systemctl", ["--user", "is-active", "openclaw-gateway.service"], { quiet: true, allowFailure: true });
+  const gatewayActive = gateway.stdout.trim() === "active";
+  console.log("openclaw-gateway.service: " + (gatewayActive ? "active" : "inactive"));
+  if (!gatewayActive) process.exitCode = 1;
   for (const unit of units) {
     const active = command("systemctl", ["--user", "is-active", unit], { quiet: true, allowFailure: true });
     const enabled = command("systemctl", ["--user", "is-enabled", unit], { quiet: true, allowFailure: true });
     console.log(unit + ": " + active.stdout.trim() + " (autostart: " + enabled.stdout.trim() + ")");
+    if (active.stdout.trim() !== "active") process.exitCode = 1;
   }
   try {
     const response = await fetch("http://127.0.0.1:" + config.bridgePort + "/healthz",
       { signal: AbortSignal.timeout(2000) });
     const data = await response.json();
-    console.log("Bridge health: " + (response.ok && data.server === "openclaw-chatgpt-bridge" ? "ready" : "not ready"));
-  } catch { console.log("Bridge health: unavailable"); }
+    const ready = response.ok && data.ok === true && data.server === "openclaw-chatgpt-bridge";
+    console.log("Bridge health: " + (ready ? "ready" : "not ready"));
+    if (!ready) process.exitCode = 1;
+  } catch { console.log("Bridge health: unavailable"); process.exitCode = 1; }
   try {
     const response = await fetch("http://127.0.0.1:" + config.tunnelHealthPort + "/readyz",
       { signal: AbortSignal.timeout(2000) });
     const body = await response.text();
     let status = "";
     try { status = JSON.parse(body)?.status || ""; } catch {}
-    console.log("Tunnel readiness: " + (response.ok && (body.trim() === "ready" || status === "ready") ? "ready" : "not ready"));
-  } catch { console.log("Tunnel readiness: unavailable"); }
-  console.log("Gateway status: run openclaw gateway status --deep");
+    const ready = response.ok && (body.trim() === "ready" || status === "ready");
+    console.log("Tunnel readiness: " + (ready ? "ready" : "not ready"));
+    if (!ready) process.exitCode = 1;
+  } catch { console.log("Tunnel readiness: unavailable"); process.exitCode = 1; }
+  console.log("Gateway details: openclaw gateway status --deep");
+}
+
+function testCredentialStore() {
+  if (!executable("secret-tool")) throw new Error("secret-tool is missing; install libsecret.");
+  const attrs = ["service", "OpenClawChatGPTBridgeTest", "nonce", randomUUID()];
+  const value = "temporary-test-" + randomUUID();
+  let cleared = false;
+  try {
+    command("secret-tool", ["store", "--label=OpenClaw ChatGPT Bridge temporary test", ...attrs],
+      { input: value, quiet: true });
+    const result = command("secret-tool", ["lookup", ...attrs], { quiet: true });
+    if (result.stdout.replace(/\r?\n$/u, "") !== value)
+      throw new Error("Secret Service round-trip failed.");
+  } finally {
+    const cleanup = command("secret-tool", ["clear", ...attrs], { quiet: true, allowFailure: true });
+    cleared = cleanup.status === 0;
+  }
+  if (!cleared) throw new Error("Could not remove the temporary Secret Service test entry.");
+  console.log("Secret Service store/lookup/clear: OK.");
 }
 
 async function main() {
@@ -240,6 +284,16 @@ async function main() {
     case "start": await start(); break;
     case "stop": command("systemctl", ["--user", "stop", TUNNEL_UNIT, BRIDGE_UNIT]); break;
     case "status": await status(); break;
+    case "bridge:restart":
+      await readLinuxConfig(paths.configPath);
+      command("systemctl", ["--user", "restart", BRIDGE_UNIT]);
+      console.log("Bridge restarted; Gateway and tunnel were left running.");
+      break;
+    case "logs":
+      command("journalctl", ["--user", "--no-pager", "--lines=100",
+        "-u", "openclaw-gateway.service", "-u", BRIDGE_UNIT, "-u", TUNNEL_UNIT]);
+      break;
+    case "test:credential-store": testCredentialStore(); break;
     case "autostart:install":
       await readLinuxConfig(paths.configPath);
       command("systemctl", ["--user", "enable", ...units]);

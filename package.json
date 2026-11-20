@@ -10,6 +10,8 @@
     "autostart:install": "node scripts/platform.mjs autostart:install",
     "autostart:uninstall": "node scripts/platform.mjs autostart:uninstall",
     "status": "node scripts/platform.mjs status",
+    "bridge:restart": "node scripts/platform.mjs bridge:restart",
+    "logs": "node scripts/platform.mjs logs",
     "test": "node scripts/platform.mjs test",
     "test:unit": "node --import ./tests/test-environment.mjs --test tests/*.test.mjs",
     "check": "node scripts/platform.mjs check",

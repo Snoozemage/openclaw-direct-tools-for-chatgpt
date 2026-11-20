@@ -17,6 +17,7 @@ const expectedAnnotations = {
   openclaw_grep: [true, false, false],
   openclaw_exec: [false, true, true],
   openclaw_process: [false, true, true],
+  ...(process.platform === "linux" ? { openclaw_admin: [false, true, true] } : {}),
   openclaw_tool_search: [true, false, true],
   openclaw_tool_describe: [true, false, true],
   openclaw_dispatch_action: [false, true, true],
