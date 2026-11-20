@@ -62,7 +62,7 @@ Tool availability depends on the OpenClaw runtime version, installed plugins, pa
 
 4. **Connect ChatGPT.** Add a custom MCP server using the **Tunnel** connection, select the same tunnel, then open a conversation and select the plugin. The local call monitor is available at [http://127.0.0.1:19002/monitor](http://127.0.0.1:19002/monitor) with the default port.
 
-**Quick Start (Linux/Fedora):** Install OpenClaw and its Gateway service, Node.js 22.17+, npm, ripgrep, `secret-tool` (Fedora: `sudo dnf install libsecret`), and the official Linux tunnel-client. On the `feat/linux-bridge-support` branch, run `npm run setup`, `npm start`, then `npm run status`. See [the Linux guide](docs/LINUX.md) for credentials, dependencies, service management, limitations, and the branch's remote availability.
+**Quick Start (Linux/Fedora):** Install OpenClaw and its Gateway service, Node.js 22.17+, npm, ripgrep, `secret-tool` (Fedora: `sudo dnf install libsecret`), and the official Linux tunnel-client. Run `npm run setup`, `npm start`, then `npm run status`. See [the Linux guide](docs/LINUX.md) for credentials, dependencies, service management, and limitations.
 
 On Fedora KDE, `openclaw_admin` runs user-authorized root commands with a purpose notification and Polkit authentication when needed. See [Linux administrative actions](docs/LINUX.md#administrative-actions-kde-and-passwords).
 
@@ -145,15 +145,15 @@ npm run status
 npm stop
 ```
 
-On **Windows**, `npm start` starts the Gateway, MCP bridge, Secure MCP Tunnel, and tray; `npm stop` stops the stack. On **Linux**, the same commands start/stop bridge and tunnel **user units**, with Gateway managed separately by OpenClaw and no tray. `npm run status` reports component health. The bridge defaults to `http://127.0.0.1:19002` and the Monitor to `http://127.0.0.1:19002/monitor`; the Gateway defaults to port `19001` for the Windows setup and typically `18789` for Linux. Configured ports may differ.
+On **Windows**, `npm start` starts the Gateway, MCP bridge, Secure MCP Tunnel, and tray; `npm stop` stops the stack. On **Linux KDE**, `npm start` also launches a Qt6 tray, while `npm stop` stops the bridge, tunnel and tray (Gateway remains independently managed by OpenClaw). `npm run status` reports component health. The bridge defaults to `http://127.0.0.1:19002` and the Monitor to `http://127.0.0.1:19002/monitor`; the Gateway defaults to port `19001` for the Windows setup and typically `18789` for Linux. Configured ports may differ.
 
-**Automatic startup is opt-in:** On Windows, run `npm run autostart:install` to add one **OpenClaw Direct Tools** entry to Windows Startup apps. On Linux, this enables the bridge and tunnel user units at login (see [Linux setup](docs/LINUX.md)); on Windows the startup entry is managed in **Task Manager → Startup apps**. Run `npm run autostart:uninstall` to disable it; the Windows-only `-- -StopService` flag also stops the running Windows stack.
+**Automatic startup is opt-in:** On Windows, run `npm run autostart:install` to add one **OpenClaw Direct Tools** entry to Windows Startup apps. On Linux KDE, this enables the bridge and tunnel user units plus a tray desktop autostart entry at login (see [Linux setup](docs/LINUX.md)); on Windows the startup entry is managed in **Task Manager → Startup apps**. Run `npm run autostart:uninstall` to disable it; the Windows-only `-- -StopService` flag also stops the running Windows stack.
 
 ### Windows lifecycle
 
 A per-user `service-supervisor.ps1` manages the Gateway, bridge, tunnel, and tray in the interactive Windows session; it is not a system-wide Windows Service. `service-start.ps1` enforces a single supervisor instance, while `service-stop.ps1` requests coordinated shutdown through `stop.ps1`. The supervisor runs `gateway-task.ps1` for Gateway recovery and invokes `start.ps1` to wait for RPC readiness before reconciling the bridge and tunnel. `bridge-supervisor.ps1` independently restarts the bridge process.
 
-The tray companion reports Gateway, bridge, and tunnel health (green when ready, yellow during startup or partial availability, red when offline or misconfigured). Its menu can open the Monitor, restart the bridge, stop the full stack, or exit only the tray. Status refreshes every 3.5 seconds. See the OpenClaw [Gateway health checks](https://docs.openclaw.ai/gateway/health) for the endpoint contracts.
+The tray companion (Windows and Linux KDE) reports Gateway, bridge, and tunnel health (green when ready, yellow during startup or partial availability, red when offline or misconfigured); active tools use blue and desktop control uses purple. Its menu can open the Monitor, toggle AI Cursor, restart the bridge, stop OpenClaw Direct Tools, or exit only the tray. Status refreshes every 3.5 seconds. See the OpenClaw [Gateway health checks](https://docs.openclaw.ai/gateway/health) for the endpoint contracts.
 
 The autostart installer creates one Startup-folder shortcut named **OpenClaw Direct Tools**, using the purple potion icon and a native launcher that starts PowerShell without a console window. The repository includes the prebuilt executable; the installer rebuilds it from `startup-launcher.cs` when a .NET Framework C# compiler is available and otherwise uses the bundled copy. It also removes legacy Registry Run and Scheduled Task entries. The separate OpenClaw Node task/runtime is not modified.
 

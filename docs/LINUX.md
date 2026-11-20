@@ -4,13 +4,12 @@
 
 The Linux implementation operates the same MCP Bridge and Secure MCP Tunnel used by Windows, but manages them as unprivileged `systemd --user` services. The OpenClaw Gateway stays under OpenClaw's own service manager. It does **not** install OpenClaw, change Windows service registration, or implicitly grant root access.
 
-Validated locally on **Fedora 45 KDE Plasma / Wayland**, using OpenClaw **2026.11.6**: Gateway, Bridge and Tunnel were all active and their health checks succeeded. Full desktop CUA support has not been ported.
-
-Working branch: `feat/linux-bridge-support`. Confirm remote branch availability with `git branch -a`; a local checkout does not imply that changes have been committed or pushed.
+Validated locally on **Fedora 45 KDE Plasma / Wayland**, using OpenClaw **2026.11.6**: Gateway, Bridge and Tunnel were all active and their health checks succeeded. A KDE Qt6 system tray companion now matches the Windows status colors, tool/computer activity glyphs, and context-menu controls. Full desktop CUA support has not been ported.
 
 ## Requirements
 
 - Node.js 22.17+ and npm, Git, ripgrep, `systemd --user`, `secret-tool` (libsecret), and an unlocked desktop Secret Service keyring.
+- For the Linux tray: Python 3, Qt6/PySide6 (`python3-pyside6` on Fedora), and a KDE desktop session with a system tray.
 - OpenClaw configured at `~/.openclaw/openclaw.json`; an already working OpenClaw Gateway service.
 - Official [OpenAI tunnel-client](https://github.com/openai/tunnel-client/releases/latest), verified for the system architecture.
 - A Secure MCP Tunnel ID and appropriately permissioned OpenAI Platform API key.
@@ -18,7 +17,7 @@ Working branch: `feat/linux-bridge-support`. Confirm remote branch availability 
 On Fedora, system dependencies:
 
 ```bash
-sudo dnf install git libsecret ripgrep
+sudo dnf install git libsecret ripgrep python3-pyside6
 ```
 
 OpenClaw can be installed independently of Fedora's RPM package. The current machine's OpenClaw CLI resides at `~/.openclaw/bin/openclaw` and its private Node toolchain under `~/.openclaw/tools/node/bin`. **Do not reinstall the old Fedora RPM just to get a `node` or `npm` command.** Add the private toolchain to your interactive shell's `PATH` if needed:
@@ -50,6 +49,8 @@ Generated paths:
 | Local Bridge config | `~/.config/openclaw-chatgpt-bridge/config.json` |
 | Tunnel profiles | `~/.config/openclaw-chatgpt-bridge/tunnel-profiles/` |
 | Bridge and Tunnel units | `~/.config/systemd/user/openclaw-chatgpt-{bridge,tunnel}.service` |
+| KDE tray login autostart | `~/.config/autostart/openclaw-direct-tools-tray.desktop` |
+| KDE tray log | `~/.local/state/openclaw-chatgpt-bridge/tray.log` |
 | Gateway config / state | `~/.openclaw/` (owned by OpenClaw) |
 
 Default local ports are Gateway **18789**, Bridge **19002**, Tunnel health **8081**. They can be overridden during setup using the existing `OPENCLAW_*_PORT` environment variables. Monitor: `http://127.0.0.1:19002/monitor`.
@@ -60,13 +61,16 @@ The Tunnel service waits for Bridge HTTP health before starting the tunnel-clien
 
 | Command | Action |
 |---|---|
-| `npm start` | Start or reconcile Gateway and start Bridge/Tunnel |
-| `npm stop` | Stop Bridge/Tunnel; leave Gateway untouched |
+| `npm start` | Start or reconcile Gateway, start Bridge/Tunnel, and launch KDE tray if available |
+| `npm stop` | Stop Bridge/Tunnel and exit the tray; leave Gateway untouched |
 | `npm run status` | Check Gateway, Bridge, Tunnel services and HTTP readiness; nonzero exit if unhealthy |
 | `npm run bridge:restart` | Restart only the Bridge |
+| `npm run tray:start` | Launch the singleton KDE tray using a transient user service |
+| `npm run tray:stop` | Exit the tray without stopping Gateway/Bridge/Tunnel |
+| `npm run tray:status` | Print the current tray status, or fail if it is not running |
 | `npm run logs` | Show the latest 100 Gateway/Bridge/Tunnel journal entries |
-| `npm run autostart:install` | Enable Bridge/Tunnel at user login |
-| `npm run autostart:uninstall` | Disable login autostart without stopping active services |
+| `npm run autostart:install` | Enable Bridge/Tunnel and KDE tray at user login |
+| `npm run autostart:uninstall` | Disable Bridge/Tunnel and KDE tray login autostart without stopping active services |
 | `npm run test:credential-store` | Test temporary Secret Service store/lookup/clear and remove test data |
 | `npm run check` | Syntax-check JS source |
 | `npm run test:unit` | Run JS unit tests |
@@ -75,7 +79,7 @@ The Tunnel service waits for Bridge HTTP health before starting the tunnel-clien
 
 ## Windows parity and intentional differences
 
-Shared JS MCP tools, Monitor, browser integration and Git/file tools work on Linux where corresponding OpenClaw runtime capabilities exist. Linux uses systemd user units and journald instead of the Windows background supervisor, registry/startup shortcut, tray companion and its log files. The Windows native screen border and computer/CUA node are **not** automatically supported on Fedora: they require a separately compatible Linux desktop driver.
+Shared JS MCP tools, Monitor, browser integration and Git/file tools work on Linux where corresponding OpenClaw runtime capabilities exist. Linux uses systemd user units and journald instead of the Windows background supervisor and Windows startup shortcut. The Linux PySide6 tray reproduces the Windows status (green/yellow/red), activity (blue/purple), 3.5-second status polling, 500-ms activity polling, cursor toggle, Monitor double-click, Bridge restart, service stop and tray-only exit. KDE renders the native context menu, so its styling can differ from WinForms. The Linux Stop action stops Bridge/Tunnel but intentionally leaves OpenClaw's independently owned Gateway running. The Windows native screen border and computer/CUA node are **not** automatically supported on Fedora: they require a separately compatible Linux desktop driver.
 
 Chrome auto-discovery checks Linux executable paths and XDG profiles. Windows path resolution explicitly uses Windows path rules, including when tests run on Linux; Windows behavior does not depend on the operating system running the tests.
 

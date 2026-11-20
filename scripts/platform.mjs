@@ -51,7 +51,7 @@ if (action === "test" && process.platform === "linux") {
   run("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", resolve(repoRoot, windowsScripts[action])]);
 } else if (process.platform === "linux") {
   const supported = ["setup", "start", "stop", "status", "autostart:install", "autostart:uninstall",
-    "bridge:restart", "logs", "test:credential-store"];
+    "bridge:restart", "logs", "test:credential-store", "tray:start", "tray:stop", "tray:status"];
   if (!supported.includes(action)) throw new Error("Unknown command: " + action);
   run(process.execPath, [resolve(repoRoot, "scripts/linux/manage.mjs"), action]);
 } else {
