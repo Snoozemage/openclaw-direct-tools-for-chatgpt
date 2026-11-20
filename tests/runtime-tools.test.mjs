@@ -10,7 +10,9 @@ test("exec and process expose independent native runtime tool schemas", () => {
   assert.ok(exec.inputSchema.required.includes("command"));
   assert.ok(exec.inputSchema.properties.workdir);
   assert.ok(exec.inputSchema.properties.pty);
-  assert.match(exec.description, /Use for builds, tests, Git, package managers, and other development commands\. Always set background: true when launching a GUI application/u);
+  assert.match(exec.description, /Use for builds, tests, Git, package managers/u);
+  assert.match(exec.description, /use openclaw_admin for root commands instead of sudo/u);
+  assert.match(exec.description, /Always set background: true when launching a GUI application/u);
   assert.match(exec.inputSchema.properties.background.description, /Start an independent background process that survives the request\. Set true when launching a GUI app/u);
   assert.deepEqual(process.inputSchema.properties.action.enum, ["list", "poll", "log", "write", "send-keys", "submit", "paste", "kill", "clear", "remove"]);
   assert.ok(process.inputSchema.required.includes("action"));

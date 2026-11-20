@@ -81,7 +81,7 @@ const properties = {
 
 export const computerToolDefinition = {
   name: "openclaw_computer",
-  description: "Control the Windows desktop through the OpenClaw computer node. Use action=snapshot first, reuse its executionId, and pass its displayFrameId with coordinate-based actions. Take a fresh snapshot after screen changes. Batch up to 5 predictable actions between observations; use shorter batches when the next step depends on seeing the result of an interaction. Batch reduces LLM/MCP round-trips but each desktop action still incurs a separate Gateway call. Call action=close_execution when finished; idle executions are closed automatically after five minutes. This controls desktop UI, not browser DOM.",
+  description: "Control desktop UI through a compatible paired OpenClaw computer node (Windows CUA by default on Windows; Linux requires OPENCLAW_COMPUTER_NODE and a separately installed driver). Use action=snapshot first, reuse its executionId, and pass its displayFrameId with coordinate-based actions. Take a fresh snapshot after screen changes. Batch up to 5 predictable actions between observations; use shorter batches when the next step depends on seeing the result of an interaction. Batch reduces LLM/MCP round-trips but each desktop action still incurs a separate Gateway call. Call action=close_execution when finished; idle executions are closed automatically after five minutes. This controls desktop UI, not browser DOM.",
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
   inputSchema: {
     type: "object",

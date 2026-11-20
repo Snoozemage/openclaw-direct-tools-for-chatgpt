@@ -1,3 +1,4 @@
+import process from "node:process";
 import { startHereToolDefinition } from "../tools/start-here/schema.mjs";
 import { bridgeRestartToolDefinition } from "../tools/bridge-restart/schema.mjs";
 import { browserToolDefinition } from "../tools/browser/schema.mjs";
@@ -6,7 +7,8 @@ import { imageRenderToolDefinition } from "../tools/image-render/schema.mjs";
 import { fileToolDefinitions } from "../tools/files/schema.mjs";
 import { fileSearchToolDefinitions } from "../tools/file-search/schema.mjs";
 import { runtimeToolDefinitions } from "../tools/runtime/schema.mjs";
+import { adminToolDefinition } from "../tools/admin/schema.mjs";
 import { toolDiscoveryDefinitions } from "../tools/tool-discovery/schema.mjs";
 
 // Assemble the public MCP tool list from the tool schemas.
-export const toolDefinitions = [startHereToolDefinition, bridgeRestartToolDefinition, browserToolDefinition, computerToolDefinition, imageRenderToolDefinition, ...fileToolDefinitions, ...fileSearchToolDefinitions, ...runtimeToolDefinitions, ...toolDiscoveryDefinitions];
+export const toolDefinitions = [startHereToolDefinition, bridgeRestartToolDefinition, browserToolDefinition, computerToolDefinition, imageRenderToolDefinition, ...fileToolDefinitions, ...fileSearchToolDefinitions, ...runtimeToolDefinitions, ...(process.platform === "linux" ? [adminToolDefinition] : []), ...toolDiscoveryDefinitions];

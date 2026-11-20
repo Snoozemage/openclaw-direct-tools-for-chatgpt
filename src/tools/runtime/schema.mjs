@@ -6,7 +6,7 @@ export const runtimeToolDefinitions = [
   {
     name: "openclaw_exec",
     title: "Run Command",
-    description: "Run a shell command through OpenClaw's native exec tool. Use for builds, tests, Git, package managers, and other development commands. Always set background: true when launching a GUI application or any persistent server/watcher so it survives exec completion; leave it off for finite commands. If the result says a process is still running, use openclaw_process with its sessionId. On Windows, invoke executables directly and use backslash paths; do not wrap commands in cmd /c or powershell -Command.",
+    description: "Run a shell command through OpenClaw's native exec tool. Use for builds, tests, Git, package managers, and other development commands. On Linux, use openclaw_admin for root commands instead of sudo here (native exec may have NoNewPrivileges). Always set background: true when launching a GUI application or any persistent server/watcher so it survives exec completion; leave it off for finite commands. If the result says a process is still running, use openclaw_process with its sessionId. On Windows, invoke executables directly and use backslash paths; do not wrap commands in cmd /c or powershell -Command.",
     annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     inputSchema: {
       type: "object",

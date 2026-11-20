@@ -207,6 +207,7 @@ export function createComputerToolHandler({ idleTimeoutMs = DEFAULT_IDLE_TIMEOUT
 
     const invoke = dependencies.invokeNodeCommand ?? invokeNodeCommand;
     const node = String(dependencies.node ?? computerNode);
+    if (!node.trim()) return toolError("Desktop automation is unavailable: configure OPENCLAW_COMPUTER_NODE with a compatible paired computer node. Windows CUA is not bundled on Linux.");
     const key = node;
     const timeoutMs = Number.isInteger(args.timeoutMs) && args.timeoutMs > 0 ? args.timeoutMs : 30000;
     const context = { invoke, node, key, timeoutMs };
