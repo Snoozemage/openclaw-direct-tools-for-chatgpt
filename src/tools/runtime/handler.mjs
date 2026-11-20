@@ -17,16 +17,22 @@ async function createNativeToolMap() {
   const distPath = path.join(packageRoot, "dist");
   const entries = await readdir(distPath, { withFileTypes: true });
   const candidates = entries
-    .filter((entry) => entry.isFile() && /^agent-tools-.*\.mjs$/.test(entry.name))
+    .filter((entry) => entry.isFile() && /^agent-tools-.*\.(?:mjs|js)$/.test(entry.name))
     .map((entry) => entry.name)
     .sort();
 
   let factory = null;
-  for (const name of candidates) {
+  const sdkPath = path.join(distPath, "plugin-sdk", "agent-harness.js");
+  try {
+    const sdk = await import(pathToFileURL(sdkPath).href);
+    factory = sdk.createOpenClawCodingToolsAsync ?? sdk.createOpenClawCodingTools ?? null;
+  } catch (error) {
+    if (error?.code !== "ERR_MODULE_NOT_FOUND" && error?.code !== "ENOENT") throw error;
+  }
+  for (const name of factory ? [] : candidates) {
     const modulePath = path.join(distPath, name);
     const source = await readFile(modulePath, "utf8");
-    if (!source.includes("function createOpenClawCodingToolsAsync")
-      || !source.includes("assembleOpenClawCodingTools(options")) continue;
+    if (!source.includes("createOpenClawCodingToolsAsync")) continue;
     const imported = await import(pathToFileURL(modulePath).href);
     const candidate = imported.createOpenClawCodingToolsAsync ?? imported.n;
     if (typeof candidate === "function") {

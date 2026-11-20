@@ -23,6 +23,7 @@ test("Linux services preserve the bridge restart contract and avoid embedding se
   assert.ok(bridge.includes("Restart=always"));
   assert.ok(tunnel.includes("Restart=on-failure"));
   assert.ok(tunnel.includes("After=network-online.target " + BRIDGE_UNIT));
+  assert.ok(tunnel.includes("Wants=network-online.target " + BRIDGE_UNIT));
   assert.ok(!tunnel.includes("CONTROL_PLANE_API_KEY"));
   assert.notEqual(TUNNEL_UNIT, BRIDGE_UNIT);
   const customized = renderLinuxUnit({ role: "bridge", repoRoot: "/opt/bridge", nodePath: "/usr/bin/node", configPath: "/home/test/.config/bridge/config.json" });

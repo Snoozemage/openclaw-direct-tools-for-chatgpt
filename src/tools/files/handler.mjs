@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, lstat, stat } from "node:fs/promises";
 import { createTwoFilesPatch } from "diff";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,16 +22,22 @@ async function createNativeFileToolMap() {
   const distPath = path.join(packageRoot, "dist");
   const entries = await readdir(distPath, { withFileTypes: true });
   const candidates = entries
-    .filter((entry) => entry.isFile() && /^agent-tools-.*\.mjs$/.test(entry.name))
+    .filter((entry) => entry.isFile() && /^agent-tools-.*\.(?:mjs|js)$/.test(entry.name))
     .map((entry) => entry.name)
     .sort();
 
   let factory = null;
-  for (const name of candidates) {
+  const sdkPath = path.join(distPath, "plugin-sdk", "agent-harness.js");
+  try {
+    const sdk = await import(pathToFileURL(sdkPath).href);
+    factory = sdk.createOpenClawCodingToolsAsync ?? sdk.createOpenClawCodingTools ?? null;
+  } catch (error) {
+    if (error?.code !== "ERR_MODULE_NOT_FOUND" && error?.code !== "ENOENT") throw error;
+  }
+  for (const name of factory ? [] : candidates) {
     const modulePath = path.join(distPath, name);
     const source = await readFile(modulePath, "utf8");
-    if (!source.includes("function createOpenClawCodingToolsAsync")
-      || !source.includes("assembleOpenClawCodingTools(options")) continue;
+    if (!source.includes("createOpenClawCodingToolsAsync")) continue;
 
     const imported = await import(pathToFileURL(modulePath).href);
     const candidate = imported.createOpenClawCodingToolsAsync ?? imported.n;
@@ -59,7 +65,9 @@ async function createNativeFileToolMap() {
   });
 
   const byName = new Map(Array.isArray(tools) ? tools.map((tool) => [tool.name, tool]) : []);
-  for (const nativeName of nativeToolNames.values()) {
+  // Fedora's agent-harness SDK provides read/edit/write but not ls/apply_patch.
+  // Do not disable available native tools because an unrelated tool is absent.
+  for (const nativeName of ["read", "edit", "write"]) {
     if (typeof byName.get(nativeName)?.execute !== "function") {
       throw new Error("OpenClaw runtime did not construct an executable native file tool: " + nativeName);
     }
@@ -202,6 +210,21 @@ export function createFileToolHandler({
   async function executeOne(nativeToolName, args = {}) {
     const startedAt = Date.now();
     try {
+      if (nativeToolName === "ls" && resolveTool === getNativeFileTool) {
+        const dir = path.resolve(args.path || workspaceDir);
+        const max = Number.isInteger(args.limit) && args.limit > 0 ? Math.min(args.limit, 500) : 500;
+        const names = (await readdir(dir)).sort();
+        const selected = names.filter((name) => !args.after || name > args.after).slice(0, max);
+        const entries = await Promise.all(selected.map(async (name) => {
+          const info = await lstat(path.join(dir, name));
+          return { name, type: info.isDirectory() ? "directory" : info.isSymbolicLink() ? "symlink" : info.isFile() ? "file" : "other", size: info.size };
+        }));
+        const remaining = names.some((name) => name > (selected.at(-1) ?? args.after ?? "")) && selected.length === max;
+        return {
+          content: [{ type: "text", text: entries.map((entry) => `${entry.type === "directory" ? "d" : "-"} ${entry.name}`).join("\n") || "(empty)" }],
+          structuredContent: { path: dir, entries, ...(remaining ? { after: selected.at(-1) } : {}) },
+        };
+      }
       const tool = await resolveTool(nativeToolName);
       const preparedArgs = typeof tool.prepareArguments === "function"
         ? await tool.prepareArguments(args)

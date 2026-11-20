@@ -1,11 +1,11 @@
 import { access, mkdir, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, posix } from "node:path";
+import { dirname, posix, win32 } from "node:path";
 
 export function browserCursorPreferencePath({ env = process.env, platform = process.platform, home = homedir() } = {}) {
   if (env.OPENCLAW_BROWSER_CURSOR_PREFERENCE_PATH) return env.OPENCLAW_BROWSER_CURSOR_PREFERENCE_PATH;
   return platform === "win32"
-    ? join(env.LOCALAPPDATA || home, "OpenClawChatGPTBridge", "browser-cursor.disabled")
+    ? win32.join(env.LOCALAPPDATA || home, "OpenClawChatGPTBridge", "browser-cursor.disabled")
     : posix.join(env.XDG_CONFIG_HOME || posix.join(home, ".config"), "openclaw-chatgpt-bridge", "browser-cursor.disabled");
 }
 

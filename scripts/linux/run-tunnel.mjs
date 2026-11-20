@@ -3,6 +3,25 @@ import process from "node:process";
 import { readLinuxConfig, SECRET_ATTRIBUTES } from "./core.mjs";
 
 const config = await readLinuxConfig();
+// A systemd After= dependency orders process launches, not HTTP readiness.
+// tunnel-client's initial MCP discovery is one-shot; starting it too early
+// disables the control-plane poller until the process is restarted.
+const bridgeHealth = `http://127.0.0.1:${config.bridgePort}/healthz`;
+let bridgeReady = false;
+for (let attempt = 0; attempt < 40; attempt += 1) {
+  try {
+    const response = await fetch(bridgeHealth, { signal: AbortSignal.timeout(1000) });
+    const health = response.ok ? await response.json() : null;
+    if (health?.server === "openclaw-chatgpt-bridge") {
+      bridgeReady = true;
+      break;
+    }
+  } catch { /* Bridge has not started listening yet. */ }
+  await new Promise((resolve) => setTimeout(resolve, 500));
+}
+if (!bridgeReady) {
+  throw new Error(`Bridge is not ready at ${bridgeHealth}; tunnel service will retry.`);
+}
 let key = process.env.CONTROL_PLANE_API_KEY;
 if (!key) {
   const result = spawnSync("secret-tool", ["lookup", ...SECRET_ATTRIBUTES], {
