@@ -75,6 +75,21 @@ The Tunnel service waits for Bridge HTTP health before starting the tunnel-clien
 | `npm run check` | Syntax-check JS source |
 | `npm run test:unit` | Run JS unit tests |
 
+### Run directly using shell scripts
+
+From the repository root, use these executable Linux launchers (or prefix them with `bash`):
+
+```bash
+./scripts/linux/start.sh           # Start Gateway if needed, Bridge, Tunnel and KDE tray
+./scripts/linux/stop.sh            # Stop Bridge/Tunnel and tray, keep Gateway running
+./scripts/linux/restart.sh         # Restart Bridge, Tunnel and tray together
+./scripts/linux/restart-bridge.sh  # Restart Bridge only; leave Tunnel and Gateway running
+./scripts/linux/status.sh          # Check service and HTTP health
+./scripts/linux/logs.sh            # Show recent Gateway/Bridge/Tunnel logs
+```
+
+These wrappers call the existing Linux lifecycle manager, so they do not install or duplicate services. They work from any current directory, use OpenClaw's bundled Node.js when available, and also accept `OPENCLAW_NODE=/absolute/path/to/node`. For a tunnel that is not polling, use `restart.sh` rather than the Bridge-only restart. Run them from a terminal to see the output.
+
 `openclaw_bridge_restart` asks the existing Bridge supervisor to restart it; it does not touch Gateway or Tunnel. To inspect services directly, use `systemctl --user status <unit>` or `journalctl --user -u <unit>`.
 
 ## Windows parity and intentional differences
