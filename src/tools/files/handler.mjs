@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile, readdir, lstat, stat } from "node:fs/promises";
+import { readFile, readdir, lstat, realpath, stat } from "node:fs/promises";
 import { createTwoFilesPatch } from "diff";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -203,6 +203,24 @@ function errorResponse(nativeTool, error, startedAt) {
   };
 }
 
+// Native reads reject paths containing symlinks, including Flatpak desktop entries.
+// Resolve existing paths first, then let the native reader apply its own access
+// checks to the canonical destination. Do not change edit/write semantics.
+async function resolveReadSymlink(args, workspaceDir) {
+  if (typeof args?.path !== "string" || !args.path.trim()) return args;
+  const requested = path.isAbsolute(args.path)
+    ? path.normalize(args.path)
+    : path.resolve(workspaceDir, args.path);
+  let canonical;
+  try {
+    canonical = await realpath(requested);
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return args;
+    throw error;
+  }
+  return canonical === requested ? args : { ...args, path: canonical };
+}
+
 export function createFileToolHandler({
   resolveTool = getNativeFileTool,
   workspaceDir = process.env.OPENCLAW_WORKSPACE_DIR || path.join(stateDir, "workspace"),
@@ -226,9 +244,12 @@ export function createFileToolHandler({
         };
       }
       const tool = await resolveTool(nativeToolName);
-      const preparedArgs = typeof tool.prepareArguments === "function"
-        ? await tool.prepareArguments(args)
+      const inputArgs = nativeToolName === "read"
+        ? await resolveReadSymlink(args, workspaceDir)
         : args;
+      const preparedArgs = typeof tool.prepareArguments === "function"
+        ? await tool.prepareArguments(inputArgs)
+        : inputArgs;
       let patchSnapshots = null;
       if (nativeToolName === "apply_patch") {
         try {

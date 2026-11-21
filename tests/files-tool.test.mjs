@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileToolDefinitions } from "../src/tools/files/schema.mjs";
@@ -137,6 +137,76 @@ test("apply_patch returns a unified diff of the file contents before and after t
     assert.match(result.structuredContent.patch, /^\+after$/m);
     assert.match(result.structuredContent.patch, /^\-removed$/m);
     assert.match(result.structuredContent.patch, /^\+added$/m);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("read resolves file and parent-directory symlinks before invoking the native reader", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-read-link-"));
+  try {
+    await mkdir(path.join(workspaceDir, "real"));
+    const file = path.join(workspaceDir, "real", "file.txt");
+    await writeFile(file, "one\ntwo\n", "utf8");
+    await symlink("real", path.join(workspaceDir, "linked-dir"));
+    await symlink("linked-dir/file.txt", path.join(workspaceDir, "linked-file.txt"));
+    const canonicalPath = await realpath(file);
+    const prepared = [];
+    const handler = createFileToolHandler({
+      workspaceDir,
+      resolveTool: async () => ({
+        prepareArguments: (args) => {
+          prepared.push(args);
+          return args;
+        },
+        execute: async (_callId, args) => ({ content: [{ type: "text", text: args.path }] }),
+      }),
+    });
+
+    const result = await handler("openclaw_read", {
+      requests: [
+        { path: "linked-file.txt", offset: 2, limit: 3 },
+        { path: "linked-dir/file.txt", offset: 1, limit: 2 },
+        { path: "real/file.txt", offset: 1, limit: 5 },
+      ],
+    });
+    assert.equal(result.isError, undefined);
+    // Batch requests run concurrently; native invocation order is unspecified.
+    assert.deepEqual(prepared.sort((left, right) => left.limit - right.limit), [
+      { path: canonicalPath, offset: 1, limit: 2 },
+      { path: canonicalPath, offset: 2, limit: 3 },
+      { path: "real/file.txt", offset: 1, limit: 5 },
+    ]);
+    assert.deepEqual(result.structuredContent.results.map(({ path }) => path), [
+      "linked-file.txt", "linked-dir/file.txt", "real/file.txt",
+    ]);
+  } finally {
+    await rm(workspaceDir, { recursive: true, force: true });
+  }
+});
+
+test("read preserves missing paths and rejects symlink loops without invoking native read", async () => {
+  const workspaceDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-read-broken-link-"));
+  try {
+    await symlink("missing.txt", path.join(workspaceDir, "broken.txt"));
+    await symlink("loop.txt", path.join(workspaceDir, "loop.txt"));
+    const paths = [];
+    const handler = createFileToolHandler({
+      workspaceDir,
+      resolveTool: async () => ({
+        execute: async (_callId, args) => {
+          paths.push(args.path);
+          return { isError: true, content: [{ type: "text", text: "not found" }] };
+        },
+      }),
+    });
+    const broken = await handler("openclaw_read", { path: "broken.txt", optional: true });
+    assert.equal(broken.isError, true);
+    assert.deepEqual(paths, ["broken.txt"]);
+    const loop = await handler("openclaw_read", { path: "loop.txt" });
+    assert.equal(loop.isError, true);
+    assert.match(loop.content[0].text, /ELOOP|too many levels/i);
+    assert.deepEqual(paths, ["broken.txt"]);
   } finally {
     await rm(workspaceDir, { recursive: true, force: true });
   }
