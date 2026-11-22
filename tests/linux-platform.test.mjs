@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { posix } from "node:path";
 import {
   BRIDGE_UNIT, TUNNEL_UNIT, linuxPaths, renderLinuxUnit, bridgeEnvironment,
-  systemdArg, validatePort, SECRET_ATTRIBUTES,
+  systemdArg, validatePort, SECRET_ATTRIBUTES, networkFingerprint,
 } from "../scripts/linux/core.mjs";
 import { chromeLaunchCandidates, resolveChromeLaunchConfig } from "../src/tools/browser/chrome-launch.mjs";
 import { browserCursorPreferencePath } from "../src/tools/browser/cursor-preference.mjs";
@@ -28,6 +28,22 @@ test("Linux services preserve the bridge restart contract and avoid embedding se
   assert.notEqual(TUNNEL_UNIT, BRIDGE_UNIT);
   const customized = renderLinuxUnit({ role: "bridge", repoRoot: "/opt/bridge", nodePath: "/usr/bin/node", configPath: "/home/test/.config/bridge/config.json" });
   assert.ok(customized.includes('Environment="OPENCLAW_BRIDGE_CONFIG=/home/test/.config/bridge/config.json"'));
+});
+
+test("Network fingerprint detects gateway and source IP changes, not unrelated interfaces", () => {
+  const interfaces = {
+    wlo1: [{ family: "IPv4", address: "192.168.1.23", internal: false }],
+    docker0: [{ family: "IPv4", address: "172.17.0.1", internal: false }],
+  };
+  const route = "default via 192.168.1.1 dev wlo1 proto dhcp metric 600";
+  const baseline = networkFingerprint(route, interfaces);
+  assert.ok(baseline.includes("192.168.1.23"));
+  assert.equal(baseline, networkFingerprint(route, { ...interfaces, docker0: [] }));
+  assert.notEqual(baseline, networkFingerprint(route, { ...interfaces,
+    wlo1: [{ family: "IPv4", address: "192.168.10.238", internal: false }],
+  }));
+  assert.notEqual(baseline, networkFingerprint("default via 192.168.10.1 dev wlo1", interfaces));
+  assert.equal(networkFingerprint("", interfaces), "");
 });
 
 test("systemd arguments protect path quoting and specifier expansion", () => {

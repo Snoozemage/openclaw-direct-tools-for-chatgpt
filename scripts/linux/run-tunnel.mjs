@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import process from "node:process";
-import { readLinuxConfig, SECRET_ATTRIBUTES } from "./core.mjs";
+import { networkInterfaces } from "node:os";
+import { readLinuxConfig, SECRET_ATTRIBUTES, networkFingerprint } from "./core.mjs";
 
 const config = await readLinuxConfig();
 // A systemd After= dependency orders process launches, not HTTP readiness.
@@ -37,13 +38,59 @@ const child = spawn(config.tunnelClientPath, ["run", "--config", config.tunnelPr
   env, stdio: "inherit",
 });
 key = "";
+
+// An already-established TCP connection can remain stuck after changing Wi-Fi,
+// gateway or local IP. systemd cannot recover it while the process is alive.
+// On a confirmed network transition, exit unsuccessfully so Restart=on-failure
+// starts a fresh tunnel-client with new sockets. Do not restart on a lone sample.
+function currentNetwork() {
+  const route = spawnSync("ip", ["-4", "route", "show", "default"], {
+    encoding: "utf8", timeout: 2000,
+  });
+  if (route.status !== 0) return null; // Do not restart on ip command errors.
+  return networkFingerprint(route.stdout, networkInterfaces());
+}
+let baselineNetwork = currentNetwork();
+let networkWasDown = baselineNetwork === "";
+let pendingNetwork = null;
+let networkRestart = false;
+let stopping = false;
+const networkCheck = setInterval(() => {
+  if (stopping || networkRestart) return;
+  const observed = currentNetwork();
+  if (observed === null) return;
+  if (observed === "") { networkWasDown = true; pendingNetwork = null; return; }
+  if (baselineNetwork === null || baselineNetwork === "") {
+    baselineNetwork = observed;
+    networkWasDown = false;
+    return;
+  }
+  if (!networkWasDown && observed === baselineNetwork) {
+    pendingNetwork = null;
+    return;
+  }
+  if (pendingNetwork !== observed) { pendingNetwork = observed; return; }
+  console.error("Tunnel network changed or reconnected; restarting tunnel-client.");
+  networkRestart = true;
+  child.kill("SIGTERM");
+  // In case the child ignores SIGTERM, guarantee it cannot retain a stale socket.
+  const forceStop = setTimeout(() => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); }, 5000);
+  forceStop.unref();
+}, 5000);
+networkCheck.unref();
+
 child.on("error", (error) => {
   console.error("Could not start tunnel-client:", error.message);
   process.exitCode = 1;
 });
 child.on("exit", (code, signal) => {
-  process.exitCode = code ?? (signal ? 1 : 0);
+  clearInterval(networkCheck);
+  process.exitCode = networkRestart ? 1 : (code ?? (signal ? 1 : 0));
 });
 for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => { if (!child.killed) child.kill(signal); });
+  process.on(signal, () => {
+    stopping = true;
+    clearInterval(networkCheck);
+    if (!child.killed) child.kill(signal);
+  });
 }

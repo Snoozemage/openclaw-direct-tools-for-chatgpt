@@ -2,6 +2,18 @@ import { homedir } from "node:os";
 import { posix } from "node:path";
 import { readFile } from "node:fs/promises";
 
+// A routing change can strand an established tunnel TCP connection without
+// exiting tunnel-client. Fingerprint the default route and its IPv4 source(s).
+export function networkFingerprint(defaultRoutes, interfaces) {
+  const routes = defaultRoutes.trim().split("\n").map((line) => line.trim()).filter(Boolean).sort();
+  if (!routes.length) return "";
+  const devices = [...new Set(routes.flatMap((line) => [...line.matchAll(/\bdev\s+(\S+)/gu)].map((match) => match[1])))];
+  const addresses = devices.flatMap((device) => (interfaces[device] || [])
+    .filter((item) => item.family === "IPv4" && !item.internal)
+    .map((item) => `${device}:${item.address}`)).sort();
+  return JSON.stringify({ routes, addresses });
+}
+
 export const BRIDGE_UNIT = "openclaw-chatgpt-bridge.service";
 export const TUNNEL_UNIT = "openclaw-chatgpt-tunnel.service";
 export const SECRET_ATTRIBUTES = ["service", "OpenClawChatGPTBridge", "key", "CONTROL_PLANE_API_KEY"];
