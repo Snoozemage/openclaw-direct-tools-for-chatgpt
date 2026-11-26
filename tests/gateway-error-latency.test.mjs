@@ -2,11 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { invokeGatewayTool, shouldCollectGatewayErrorLogs } from "../src/openclaw-client.mjs";
 
-test("gateway errors return without waiting for diagnostics by default", async () => {
+test("gateway errors return without waiting for diagnostics when disabled", async () => {
   const previous = process.env.OPENCLAW_BRIDGE_ERROR_LOGS;
   const originalFetch = globalThis.fetch;
   try {
-    delete process.env.OPENCLAW_BRIDGE_ERROR_LOGS;
+    process.env.OPENCLAW_BRIDGE_ERROR_LOGS = "0";
     let fetches = 0;
     globalThis.fetch = async () => {
       fetches++;
@@ -32,8 +32,9 @@ test("gateway errors return without waiting for diagnostics by default", async (
   }
 });
 
-test("Gateway log collection requires explicit opt-in", () => {
-  assert.equal(shouldCollectGatewayErrorLogs({}), false);
+test("Gateway log collection defaults to enabled and supports opt-out", () => {
+  assert.equal(shouldCollectGatewayErrorLogs({}), true);
+  assert.equal(shouldCollectGatewayErrorLogs({ OPENCLAW_BRIDGE_ERROR_LOGS: "0" }), false);
   assert.equal(shouldCollectGatewayErrorLogs({ OPENCLAW_BRIDGE_ERROR_LOGS: "false" }), false);
   assert.equal(shouldCollectGatewayErrorLogs({ OPENCLAW_BRIDGE_ERROR_LOGS: "1" }), true);
 });

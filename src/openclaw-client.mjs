@@ -123,7 +123,7 @@ export async function getRecentGatewayToolErrorLog(startedAt, timeoutMs = 10000)
 }
 
 export function shouldCollectGatewayErrorLogs(env = process.env) {
-  return env.OPENCLAW_BRIDGE_ERROR_LOGS === "1";
+  return !["0", "false"].includes(env.OPENCLAW_BRIDGE_ERROR_LOGS);
 }
 
 async function attachGatewayLogDetails(error, startedAt, timeoutMs) {
